@@ -30,10 +30,6 @@
 #include "suspend.h"
 #include "breakpoints.h"
 
-#include <bfd.h>
-
-typedef bfd_vma CORE_ADDR;
-
 
 struct DebugIFace *IDebug = 0;
 struct MMUIFace *IMMU = 0;

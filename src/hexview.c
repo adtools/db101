@@ -86,6 +86,10 @@ void hex_init_section_list ()
 	char *name, *strtable;
 	struct Node *node;
 
+	open_elfhandle();
+	if (!exec_elfhandle)
+		return;
+
 	IElf->GetElfAttrsTags (exec_elfhandle,  EAT_NumSections, &hex_numsections,
 											EAT_SectionStringTable, &index,
 											TAG_DONE);
@@ -102,6 +106,8 @@ void hex_init_section_list ()
 		}
 	}
 	sectionlist[i] = NULL;
+
+	close_elfhandle(exec_elfhandle);
 }
 
 void hex_free_section_list ()
@@ -118,8 +124,15 @@ void hex_free_section_list ()
 
 void hex_load_section (int index)
 {
+	open_elfhandle();
+	if (!exec_elfhandle)
+		return;
+
 	uint32 *section = IElf->GetSectionTags(exec_elfhandle, GST_SectionIndex, index, TAG_DONE);
 	Elf32_Shdr *header = IElf->GetSectionHeaderTags (exec_elfhandle, GST_SectionIndex, index, TAG_DONE);
+	if (!section)
+		return;
+
 	uint32 size = header->sh_size;
 	char *string, interpreted_string[1024];
 	struct Node *node;
@@ -165,6 +178,7 @@ void hex_load_section (int index)
 							            IExec->AddTail(&hexlist, node);
 									}
 	}
+	close_elfhandle(exec_elfhandle);
 }
 
 void hex_free_section()
@@ -175,6 +189,9 @@ void hex_free_section()
 void hex_open_window()
 {
 	if (hex_window_is_open)
+		return;
+
+	if (!task_exists)
 		return;
 
 	hex_init_section_list ();

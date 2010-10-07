@@ -635,7 +635,8 @@ void event_loop()
 void cleanup()
 {
 	remove_hook();
-	killtask();
+	if (!isattached)
+		killtask();
 	registers_close_window();
 	locals_close_window();
 	hex_close_window();

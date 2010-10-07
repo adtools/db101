@@ -215,10 +215,6 @@ int amigaos_relocate_elfhandle ()
 BOOL 
 amigaos_attach (struct Process *aprocess)
 {
-    uint32 *array;
-	//struct PseudoSegList *seglist;
-
-
     /* Can only debug processes right now */
     if (aprocess->pr_Task.tc_Node.ln_Type != NT_PROCESS)
     {
@@ -235,7 +231,6 @@ amigaos_attach (struct Process *aprocess)
 		return FALSE;
     }
 
-    //seglist_is_mine = FALSE;
 
     IDOS->GetSegListInfoTags(exec_seglist, 
 							 GSLI_ElfHandle, &exec_elfhandle,
@@ -249,7 +244,6 @@ amigaos_attach (struct Process *aprocess)
 		return FALSE;
     }
 
-	//current_elfhandle = exec_elfhandle;
 
 
 	process  = aprocess;
@@ -266,30 +260,12 @@ amigaos_attach (struct Process *aprocess)
 
 	task_exists = TRUE;
 	task_playing = FALSE;
-#if 0
-    /* Send attach message */
-    dprintf("Sending attach message\n"); 
-    msg = get_msg_packet();
-    msg->process = (struct Process *)pProcess;
-    msg->flags = TASK_ATTACHED;
-    IExec->PutMsg(debug_data.debugger_port, (struct Message *)msg);
-     
-    /* See if the process is crashed, and send the crash as another message */
-					/*
-					if (pProcess->pr_Task.tc_State == TS_CRASHED)
-					{
-					msg = get_msg_packet();
-					msg->process = (struct Process *)pProcess;
-					msg->flags = 0;
-					IExec->PutMsg(debug_data.debugger_port, (struct Message *)msg);
-					}*/
-#endif
-    
+   
     if(process->pr_Task.tc_State == TS_CRASHED)
     {
     	process->pr_Task.tc_State = TS_SUSPENDED;
     }
-    //IDebug->AddDebugHook((struct Task *)pProcess, &debug_hook);
+
 	attach_hook();
 
 	if (open_elfhandle() == 0)
@@ -306,26 +282,6 @@ amigaos_attach (struct Process *aprocess)
 
 	return TRUE;
 
-#if 0
-    dprintf("push_target\n");
-    push_target(&amigaos_ops);
-    dprintf("clear_proceed_status\n");
-    clear_proceed_status ();
-    dprintf("insert_breakpoints\n");
-    insert_breakpoints ();     
-  
-    inferior_ptid = pid_to_ptid ((int)debug_data.current_process);
-  
-    dprintf("add_thread\n");
-    add_thread(inferior_ptid);
-  
-    inferior_created = TRUE;  
-    
-    dprintf("attaching complete\n");  
-    is_attach = TRUE;
-  
-    FUNCX;
-#endif
 }
 
 
@@ -348,7 +304,7 @@ int load_inferior(char *filename, char *path, char *args)
 		return 0;
 	if (strlen (path) == 0)
 		strcpy (fullpath, filename);
-	else if (path[strlen(path)-1] == '/')
+	else if (path[strlen(path)-1] == '/' || path[strlen(path)-1] == ':')
 		sprintf(fullpath, "%s%s", path, filename);
 	else
 		sprintf(fullpath, "%s/%s", path, filename);

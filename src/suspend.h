@@ -32,3 +32,7 @@ extern BOOL asm_trace;
 extern BOOL breakpoint_set;
 extern BOOL should_continue;
 extern BOOL entering_function;
+
+extern struct DebugIFace *IDebug;
+extern struct MMUIFace *IMMU;
+

@@ -30,6 +30,10 @@
 #include "suspend.h"
 #include "breakpoints.h"
 
+#include <bfd.h>
+
+typedef bfd_vma CORE_ADDR;
+
 
 struct DebugIFace *IDebug = 0;
 struct MMUIFace *IMMU = 0;
@@ -111,8 +115,10 @@ void attach_hook()
     debug_hook.h_Entry = (ULONG (*)())amigaos_debug_callback;
     debug_hook.h_Data =  (APTR)&debug_data;
 
+printf("trying to attach debug hook...\n");
 	if(task_exists)
 		IDebug->AddDebugHook((struct Task *)process, &debug_hook);
+printf("debug hook attached!\n");
 }
 
 void remove_hook()
@@ -205,6 +211,123 @@ int amigaos_relocate_elfhandle ()
 		}
     }
 }
+
+BOOL 
+amigaos_attach (struct Process *aprocess)
+{
+    uint32 *array;
+	//struct PseudoSegList *seglist;
+
+
+    /* Can only debug processes right now */
+    if (aprocess->pr_Task.tc_Node.ln_Type != NT_PROCESS)
+    {
+		printf ("Not a process!\n");
+		return FALSE;
+    }
+
+    /* Get the seglist and elf handle of the process */
+    exec_seglist = IDOS->GetProcSegList (aprocess, GPSLF_SEG|GPSLF_RUN);
+  
+    if (!exec_seglist)
+    {
+		printf ("Can't find seglist!\n");
+		return FALSE;
+    }
+
+    //seglist_is_mine = FALSE;
+
+    IDOS->GetSegListInfoTags(exec_seglist, 
+							 GSLI_ElfHandle, &exec_elfhandle,
+							 //GSLI_Native, &seglist,
+							 TAG_DONE);
+
+    if (!exec_elfhandle)
+    {
+		exec_seglist = 0;
+		printf ("Process is no ELF binary!\n");
+		return FALSE;
+    }
+
+	//current_elfhandle = exec_elfhandle;
+
+
+	process  = aprocess;
+
+
+    /* Suspend the task */
+    //dprintf("Process state: %d\n",pProcess->pr_Task.tc_State);
+    if (process->pr_Task.tc_State == TS_READY || process->pr_Task.tc_State == TS_WAIT)
+    {
+		printf("Suspending task %p\n", process);
+		IExec->SuspendTask((struct Task *)process, 0);
+    }
+	printf("task suspended!\n");
+
+	task_exists = TRUE;
+	task_playing = FALSE;
+#if 0
+    /* Send attach message */
+    dprintf("Sending attach message\n"); 
+    msg = get_msg_packet();
+    msg->process = (struct Process *)pProcess;
+    msg->flags = TASK_ATTACHED;
+    IExec->PutMsg(debug_data.debugger_port, (struct Message *)msg);
+     
+    /* See if the process is crashed, and send the crash as another message */
+					/*
+					if (pProcess->pr_Task.tc_State == TS_CRASHED)
+					{
+					msg = get_msg_packet();
+					msg->process = (struct Process *)pProcess;
+					msg->flags = 0;
+					IExec->PutMsg(debug_data.debugger_port, (struct Message *)msg);
+					}*/
+#endif
+    
+    if(process->pr_Task.tc_State == TS_CRASHED)
+    {
+    	process->pr_Task.tc_State = TS_SUSPENDED;
+    }
+    //IDebug->AddDebugHook((struct Task *)pProcess, &debug_hook);
+	attach_hook();
+
+	if (open_elfhandle() == 0)
+	{
+		killtask();
+		return FALSE;
+	}
+	if (amigaos_relocate_elfhandle() == -1)
+	{
+		killtask();
+		return FALSE;
+	}
+
+
+	return TRUE;
+
+#if 0
+    dprintf("push_target\n");
+    push_target(&amigaos_ops);
+    dprintf("clear_proceed_status\n");
+    clear_proceed_status ();
+    dprintf("insert_breakpoints\n");
+    insert_breakpoints ();     
+  
+    inferior_ptid = pid_to_ptid ((int)debug_data.current_process);
+  
+    dprintf("add_thread\n");
+    add_thread(inferior_ptid);
+  
+    inferior_created = TRUE;  
+    
+    dprintf("attaching complete\n");  
+    is_attach = TRUE;
+  
+    FUNCX;
+#endif
+}
+
 
 int load_inferior(char *filename, char *path, char *args)
 {
@@ -382,7 +505,13 @@ void killtask()
 	if (task_exists)
 	{
 		IExec->SuspendTask ((struct Task *) process, 0L);
-		IExec->RemTask ((struct Task *)process);
+
+		//if we attached to the process, RemTask is going to crash...
+		if (!isattached)
+			IExec->RemTask ((struct Task *)process);
+		else
+			isattached = FALSE;
+
 		task_exists = FALSE;
 		task_playing = FALSE;
 	}
@@ -395,7 +524,7 @@ void crash()
 {
 	wants_to_crash = TRUE;
 	//how to do this ???
-	//insert_breakpoint (context_ptr->ip);
+	//insert_breakpoint (context_copy.ip);
 }
 
 
@@ -415,6 +544,8 @@ amigaos_debug_callback(struct Hook *hook, struct Task *currentTask,
 	{
 		case DBHMT_REMTASK:
 			*data = 9;
+			if (currentTask == (struct Task *)process)
+				IExec->Signal ((struct Task *)me, SIGF_CHILD);
 			//task_exists = FALSE;
 			break;
 

@@ -49,6 +49,28 @@ BOOL locals_window_is_open = FALSE;
 
 struct List variablelist;
 
+BOOL is_readable_address (uint32 addr)
+{
+	uint32 attr;
+	APTR stack;
+	BOOL ret = FALSE;
+
+  	/* Go supervisor */
+	stack = IExec->SuperState();
+	
+	attr = IMMU->GetMemoryAttrs((APTR)addr, 0);
+
+	/* Return to old state */
+	if (stack)
+		IExec->UserState(stack);
+
+	if (attr & MEMATTRF_RW_MASK)
+		ret = TRUE;
+
+	return ret;
+}
+
+
 char *print_variable_value(struct stab_symbol *s)
 {
 	char *ret = malloc (256);
@@ -82,14 +104,13 @@ char *print_variable_value(struct stab_symbol *s)
 	}
 
 
-	if (s->type->ispointer)
-	{
-		sprintf( ret, "0x%x", *(uint32*)addr);
-	}
-	else
-	{
 		switch (s->type->type)
 		{
+		case T_POINTER:
+			{
+			sprintf( ret, "0x%x", *(uint32*)addr);
+			}
+			break;
 		case T_32:
 			{
 			int32 value32 = *(int32*)addr;
@@ -149,12 +170,15 @@ char *print_variable_value(struct stab_symbol *s)
 
 			break;
 		}
-	}
+
 	return ret;
 }
 	
 void locals_update_window()
 {
+	if (!locals_window_is_open)
+		return;
+
 	struct Node *node;
 
 	IExec->NewList (&variablelist);
@@ -168,7 +192,7 @@ void locals_update_window()
 		char *str = print_variable_value(s);
 		char *namestr = IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
 
-		if (s->type && s->type->ispointer)
+		if (s->type && s->type->type == T_POINTER)
 			sprintf(namestr, "*%s", s->name);
 		else
 			sprintf(namestr, "%s", s->name);
@@ -199,7 +223,7 @@ void locals_open_window()
 	if (!hasfunctioncontext)
 		return;
 
-	locals_update_window();
+	IExec->NewList (&variablelist);
 
     struct ColumnInfo *columninfo = IListBrowser->AllocLBColumnInfo(2,
         LBCIA_Column, 0,
@@ -253,7 +277,10 @@ void locals_open_window()
     {
         /*  Open the window. */
         if( localswin = (struct Window *) RA_OpenWindow(LocalsWinObj) )
+		{
         	locals_window_is_open = TRUE;
+			locals_update_window();
+		}
 	}
 }
 

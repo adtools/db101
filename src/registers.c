@@ -76,6 +76,9 @@ void add_register( char *reg, char *value)
 
 void registers_update_window()
 {
+	if (!registers_window_is_open)
+		return;
+
 	IExec->NewList (&reglist);
 
 	sprintf(regstr[0], "0x%x", context_copy.msr);
@@ -114,6 +117,8 @@ void registers_open_window()
 	if (registers_window_is_open)
 		return;
 
+	IExec->NewList (&reglist);
+
     regcolumninfo = IListBrowser->AllocLBColumnInfo(2,
         LBCIA_Column, 0,
             LBCIA_Title, "Register",
@@ -121,8 +126,6 @@ void registers_open_window()
         LBCIA_Column, 1,
             LBCIA_Title, "Value",
         TAG_DONE);
-
-	registers_update_window();
 
     /* Create the window object. */
     if(( RegisterWinObj = WindowObject,
@@ -167,7 +170,10 @@ void registers_open_window()
 
       /*  Open the window. */
         if( registerwin = (struct Window *) RA_OpenWindow(RegisterWinObj) )
+		{
 			registers_window_is_open = TRUE;
+			registers_update_window();
+		}
 
 	return;
 }

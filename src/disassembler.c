@@ -78,6 +78,9 @@ void disassembler_show_selected()
 
 void disassembler_makelist()
 {
+	if (!disassembler_window_is_open)
+		return;
+
 	struct Node *node;
 	IExec->NewList (&assemblelist);
 	int i;
@@ -123,7 +126,7 @@ void disassembler_open_window()
 	if(!hasfunctioncontext)
 		return;
 
-	disassembler_makelist();
+	IExec->NewList (&assemblelist);
 
     /* Create the window object. */
     if(( DisassemblerWinObj = WindowObject,
@@ -181,6 +184,7 @@ void disassembler_open_window()
         if( disassemblerwin = (struct Window *) RA_OpenWindow(DisassemblerWinObj) )
 		{
         	disassembler_window_is_open = TRUE;
+			disassembler_makelist();
 			disassembler_show_selected();
 		}
 	}
@@ -256,7 +260,5 @@ void disassembler_close_window()
 
 		disassembler_window_is_open = FALSE;
     }
-    
-    return;
 }
 

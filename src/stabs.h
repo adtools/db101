@@ -9,6 +9,7 @@ extern char * stabs_get_function_for_address (uint32);
 
 struct stab_function
 {
+	struct Node node;
 	char *name;
 	uint32 address;
 	uint32 size;
@@ -52,6 +53,7 @@ enum __stab_location
 enum __stab_symbol_types
 {
 	T_UNKNOWN = 0,
+	T_POINTER,
 	T_STRUCT,
 	T_VOID,
 	T_BOOL,
@@ -74,7 +76,7 @@ struct stab_typedef
 	uint32 type;
 	uint32 array;
 	uint32 number;
-	uint32 ispointer;
+	struct stab_typedef *points_to;
 };
 
 struct stab_sourcefile
@@ -86,8 +88,10 @@ struct stab_sourcefile
 };
 
 
-extern struct stab_function *stabs_interpret_function(char *, uint32);
-extern void stabs_make_function_list();
+extern void stabs_interpret_functions(void);
+extern struct stab_function *stabs_get_function_from_address (uint32);
+extern struct stab_function *stabs_get_function_from_name (char *);
+void stabs_interpret_functions(void);
 void stabs_interpret_typedefs(void);
 void stabs_interpret_globals(void);
 
@@ -96,11 +100,9 @@ char *skip_in_string (char *, char *);
 
 struct stab_typedef * stabs_get_type_from_string (char *, char *);
 
-extern uint32 numberoffunctions;
-extern uint32 function_addresses[];
-extern char * function_names[];
-
 extern struct List global_symbols;
+extern struct List function_list;
+extern struct List sourcefile_list;
 
 struct symtab_entry {
 	unsigned long n_strx;

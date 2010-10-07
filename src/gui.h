@@ -9,3 +9,4 @@ void cleanup(void);
 
 extern struct stab_function *current_function;
 extern BOOL hasfunctioncontext;
+extern BOOL isattached;

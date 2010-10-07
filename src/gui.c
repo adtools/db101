@@ -35,10 +35,13 @@
 #include "disassembler.h"
 #include "breakpoints.h"
 #include "stacktrace.h"
+#include "attach.h"
+#include "breakpointswindow.h"
 
 enum
 {
     GAD_FILENAME_BUTTON = 1,
+	GAD_ATTACH_BUTTON,
 	GAD_START_BUTTON,
 	GAD_PAUSE_BUTTON,
 	GAD_STEP_BUTTON,
@@ -63,7 +66,7 @@ struct Window *mainwin;
 Object *MainWinObj;
 BOOL main_window_is_open = FALSE;
 
-Object *SelectButtonObj, *FilenameStringObj, *ListBrowserObj;
+Object *SelectButtonObj, *FilenameStringObj, *AttachButtonObj, *ListBrowserObj;
 Object *StartButtonObj, *PauseButtonObj, *StepButtonObj, *KillButtonObj, *CrashButtonObj, *SetBreakButtonObj, *XButtonObj;
 Object *HexviewButtonObj, *VariablesButtonObj, *RegisterviewButtonObj, *DisassembleviewButtonObj, *StacktraceButtonObj;
 Object *GlobalsButtonObj;
@@ -74,7 +77,7 @@ char childpath[1024] = "";
 
 struct stab_function *current_function = NULL;
 BOOL hasfunctioncontext = FALSE;
-
+BOOL isattached = FALSE;
 
 char *request_file (struct Window *win, char **path)
 {
@@ -268,6 +271,7 @@ uint32 obtain_all_signals()
 	signal |= locals_obtain_window_signal();
 	signal |= stacktrace_obtain_window_signal();
 	signal |= globals_obtain_window_signal();
+	signal |= breakpoints_obtain_window_signal();
 	signal |= debug_sigfield;
 
 	return signal;
@@ -289,7 +293,7 @@ void main_open_window()
     /* Create the window object. */
     if(( MainWinObj = WindowObject,
             WA_ScreenTitle, "DEbug 101",
-            WA_Title, "DEbug 101 v0.7.1",
+            WA_Title, "DEbug 101 v0.8",
             WA_Width, 500,
 			WA_Height, 500,
             WA_DepthGadget, TRUE,
@@ -320,6 +324,14 @@ void main_open_window()
 						GA_ReadOnly, TRUE,
 						STRINGA_TextVal, "Select File",
 	                StringEnd,
+
+	                LAYOUT_AddChild, AttachButtonObj = ButtonObject,
+	                    GA_ID, GAD_ATTACH_BUTTON,
+	                    GA_Text, "Attach",
+	                    GA_RelVerify, TRUE,
+	                    GA_HintInfo, "Push to attach to process",
+	                ButtonEnd,
+	                CHILD_WeightedWidth, 0,
 
 				EndMember,
 				CHILD_WeightedHeight, 0,
@@ -436,7 +448,7 @@ void main_open_window()
 						GA_ID, GAD_STACKTRACE_BUTTON,
 	                    GA_RelVerify, TRUE,
 						GA_Text, "Stacktrace",
-						GA_Disabled, FALSE,
+						GA_Disabled, TRUE,
 					ButtonEnd,
 	                CHILD_WeightedHeight, 0,
 
@@ -517,6 +529,10 @@ void event_loop()
 
 						remove_line_breakpoints();
 
+						current_function = stabs_get_function_from_address (context_copy.ip);
+						if (current_function)
+							hasfunctioncontext = TRUE;
+
 						if (hasfunctioncontext)
 						{
 							int nline = get_nline_from_address (context_copy.ip);
@@ -563,8 +579,8 @@ void event_loop()
 					button_setdisabled (DisassembleviewButtonObj, TRUE);
 					IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
 
-					//close_elfhandle(exec_elfhandle);
 					globals_destroy_list();
+					globals_close_window();
 					registers_close_window();
 					hex_close_window();
 					disassembler_close_window();
@@ -600,6 +616,10 @@ void event_loop()
 				{
 					globals_event_handler();
 				}
+				if (wait & breakpoints_obtain_window_signal())
+				{
+					breakpoints_event_handler();
+				}
 				if (shouldplay)
 				{
 					play();
@@ -621,6 +641,8 @@ void cleanup()
 	hex_close_window();
 	stacktrace_close_window();
 	globals_close_window();
+	disassembler_close_window();
+	breakpoints_close_window();
 	main_close_window();
 }
 
@@ -636,6 +658,7 @@ void main_event_handler()
 			int *iptr;
             struct Node *node;
 			uint32 addr;
+			struct Process *pr;
 
 
                 while ((result = RA_HandleInput(MainWinObj, &Code)) != WMHI_LASTMSG && done != TRUE)
@@ -666,10 +689,12 @@ void main_event_handler()
 										output_statement ("New process loaded");
 
 										init_breakpoints();
-										stabs_make_function_list();
+
 										stabs_interpret_typedefs();
+										stabs_interpret_functions();
 										get_symbols();
 										stabs_interpret_globals();
+										close_elfhandle(exec_elfhandle);
 
 										button_setdisabled (SelectButtonObj, TRUE);
 										button_setdisabled (StartButtonObj, FALSE);
@@ -686,6 +711,41 @@ void main_event_handler()
 									}
 
                                     break;
+
+								case GAD_ATTACH_BUTTON:
+
+									pr = attach_select_process();
+
+									if (!pr) break;
+									if (amigaos_attach(pr))
+									{
+										output_statement ("Attached to process");
+										isattached = TRUE;
+
+										init_breakpoints();
+
+										stabs_interpret_typedefs();
+										stabs_interpret_functions();
+										get_symbols();
+										stabs_interpret_globals();
+										close_elfhandle(exec_elfhandle);
+
+										button_setdisabled (SelectButtonObj, TRUE);
+										button_setdisabled (StartButtonObj, FALSE);
+										button_setdisabled (KillButtonObj, FALSE);
+										button_setdisabled (CrashButtonObj, TRUE);
+										button_setdisabled (SetBreakButtonObj, FALSE);
+										button_setdisabled (FilenameStringObj, FALSE);
+										button_setdisabled (HexviewButtonObj, FALSE);
+										button_setdisabled (RegisterviewButtonObj, FALSE);
+
+										//IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
+										//				STRINGA_TextVal, strinfo,
+										//				TAG_DONE);
+									}
+
+
+									break;
 
 								case GAD_START_BUTTON:
 
@@ -741,12 +801,12 @@ void main_event_handler()
 									button_setdisabled (CrashButtonObj, TRUE);
 									button_setdisabled (SelectButtonObj, FALSE);
 									button_setdisabled (FilenameStringObj, TRUE);
-									IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
+									//IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
+
+									killtask();
 
 									output_statement ("Program has been killed");
 									
-									killtask();
-
 									break;
 
 								case GAD_CRASH_BUTTON:
@@ -757,19 +817,8 @@ void main_event_handler()
 
 								case GAD_SETBREAK_BUTTON:
 
-									if (task_playing)
-										pause();
+									breakpoints_open_window();
 
-									current_function = select_symbol();
-									if (current_function)
-									{
-										button_setdisabled (StepButtonObj, TRUE);
-
-										//output_statement (current_function->sourcename);
-										insert_breakpoint(current_function->address, BR_NORMAL);
-
-										hasfunctioncontext = TRUE;
-									}
 									break;
 
 								case GAD_X_BUTTON:

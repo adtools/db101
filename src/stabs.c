@@ -38,12 +38,39 @@ struct List global_symbols;
 struct List sourcefile_list;
 struct List function_list;
 
-struct stab_function *stabs_interpret_function (char *fname, uint32 faddress)
+struct stab_function *stabs_get_function_from_address (uint32 faddress)
+{
+	struct stab_function *f = (struct stab_function *)IExec->GetHead (&function_list);
+
+	while (f)
+	{
+		if (faddress >= f->address && faddress < f->address + f->size)
+			return f;
+		f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
+	}
+	return NULL;
+}
+
+struct stab_function *stabs_get_function_from_name (char *fname)
+{
+	struct stab_function *f = (struct stab_function *)IExec->GetHead (&function_list);
+
+	while (f)
+	{
+		if (!strcmp(f->name, fname))
+			return f;
+		f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
+	}
+	return NULL;
+}
+
+
+void stabs_interpret_functions ()
 {
 	char *stabstr = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stabstr", TAG_DONE);
 	uint32 *stab = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	if (!stab)
-		return NULL;
+		return;
 
 	Elf32_Shdr *header = IElf->GetSectionHeaderTags (exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	uint32 stabsize = header->sh_size;
@@ -52,6 +79,9 @@ struct stab_function *stabs_interpret_function (char *fname, uint32 faddress)
 	struct stab_symbol *symbol;
 	BOOL ispointer = FALSE;
 	char *strptr;
+	struct stab_function *f;
+
+	IExec->NewList (&function_list);
 
 	while ((uint32)sym < (uint32)stab + stabsize - sizeof (struct symtab_entry))
 	{
@@ -64,16 +94,15 @@ struct stab_function *stabs_interpret_function (char *fname, uint32 faddress)
 			break;
 
 		case N_FUN:
-			
-			if (sym->n_value == faddress)
+
 			{
 				//we reached the right symbol
-				struct stab_function *f = IExec->AllocMem (sizeof (struct stab_function), MEMF_ANY|MEMF_CLEAR);
+				f = IExec->AllocMem (sizeof (struct stab_function), MEMF_ANY|MEMF_CLEAR);
 
 				uint32 line = 0;
 
-				f->name = stabs_strdup_strip(fname);
-				f->address = faddress;
+				f->name = stabs_strdup_strip(&stabstr[sym->n_strx]);
+				f->address = sym->n_value;
 				f->sourcename = strdup (sourcename);
 				f->currentline = 0;
 				f->numberoflines = 0;
@@ -123,8 +152,9 @@ struct stab_function *stabs_interpret_function (char *fname, uint32 faddress)
 
 					case N_FUN:
 
-						f->size = sym->n_value - faddress;
+						f->size = sym->n_value - f->address;
 
+						sym--;
 						done = TRUE;
 						break;
 
@@ -132,15 +162,13 @@ struct stab_function *stabs_interpret_function (char *fname, uint32 faddress)
 						break;
 					}
 				}
-				return f;
+				IExec->AddTail (&function_list, (struct Node *)f);
 			}
 			break;
 
 		}
 		sym++;
 	}
-
-	return NULL;
 }
 
 char *skip_in_string (char *source, char *pattern)
@@ -290,21 +318,8 @@ struct stab_typedef * stabs_get_type_from_string (char *strptr, char *sourcename
 
 	struct stab_sourcefile *file = stabs_get_sourcefile (sourcename);
 	struct stab_typedef *t = stabs_get_type_from_token (file, array, typenum);
-	if (*strptr == '*')
-	{
-//printf("got a pointer: %s, array = %d, typenum = %d, file = 0x%x, t = 0x%x\n", ptr, array, typenum, file, t);
-		ispointer = TRUE;
-	}
-	if(t)
-	{
-		if (ispointer)
-		{
-			t = copy_typedef(t);
-			t->ispointer = TRUE;
-			IExec->AddTail (&file->typedef_list, (struct Node *)t);
-		}
-	}
-	else
+
+	if (!t)
 	{
 		if (array == 0 && typenum < 19)
 		{
@@ -314,7 +329,7 @@ struct stab_typedef * stabs_get_type_from_string (char *strptr, char *sourcename
 			t->type = builtin_typetable[typenum];
 			t->array = 0;	
 			t->number = typenum;
-			t->ispointer = ispointer;
+			t->points_to = NULL;
 			IExec->AddTail (&(file->typedef_list), (struct Node *)t);
 		}
 		else
@@ -322,76 +337,34 @@ struct stab_typedef * stabs_get_type_from_string (char *strptr, char *sourcename
 			strptr = skip_in_string (strptr, "=");
 			if (!strptr)
 				return NULL;
+			if (*strptr == '*')
+				ispointer = TRUE;
 			t = stabs_get_type_from_string(strptr, sourcename);
+
 			if (t)
 			{
-				BOOL oldispointer = t->ispointer;
-				t = copy_typedef (t);
-				t->array = array;
-				t->number = typenum;
-				t->ispointer = ispointer||oldispointer;
-				IExec->AddTail (&(file->typedef_list), (struct Node *)t);
+				struct stab_typedef *newt = IExec->AllocMem (sizeof (struct stab_typedef), MEMF_ANY|MEMF_CLEAR);
+				newt->name = NULL;
+				newt->array = array;
+				newt->number = typenum;
+				if (ispointer)
+				{
+					newt->type = T_POINTER;
+					newt->points_to = t;
+				}
+				else
+				{
+					newt->type = t->type;
+					newt->points_to = t->points_to;
+				}
+				IExec->AddTail (&(file->typedef_list), (struct Node *)newt);
+				t = newt;
 			}
 		}
 	}
 	return t;
 }
 
-
-
-
-uint32 numberoffunctions = 0;
-uint32 function_addresses[1024];
-char * function_names[1024];
-
-void stabs_make_function_list()
-{
-	char *stabstr = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stabstr", TAG_DONE);
-	uint32 *stab = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
-	if (!stab)
-	{
-		numberoffunctions = 0;
-		return;
-	}
-
-	Elf32_Shdr *header = IElf->GetSectionHeaderTags (exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
-	uint32 stabsize = header->sh_size;
-	struct symtab_entry *sym = (struct symtab_entry *)stab;
-	char *sourcename = NULL;
-	struct stab_symbol *symbol;
-
-	int i = 0;
-	while ((uint32)sym < (uint32)stab + stabsize - sizeof (struct symtab_entry))
-	{
-		switch (sym->n_type)
-		{
-		case N_FUN:
-			
-			function_addresses[i] = sym->n_value;
-			function_names[i] = stabs_strdup_strip (&stabstr[sym->n_strx]);
-			i++;
-			break;
-
-		default:
-
-			break;
-		}
-		sym++;
-	}
-	numberoffunctions = i;
-}
-
-char * stabs_get_function_for_address (uint32 addr)
-{
-	stabs_make_function_list();
-	int i;
-
-	for (i = 0; i<numberoffunctions; i++)
-		if (addr == function_addresses[i])
-			return function_names[i];
-
-	return NULL;
-}
 
 
 
@@ -463,7 +436,8 @@ void stabs_interpret_typedefs()
 
 			if (str_is_typedef(strptr))
 			{
-				//char *name = stabs_strdup_strip (strptr);
+				char *name = stabs_strdup_strip (strptr);
+
 				strptr = skip_in_string (strptr, ":");
 				if (strptr)
 				{

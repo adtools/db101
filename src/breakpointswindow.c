@@ -1,4 +1,4 @@
-/*globals.c*/
+/*symbols.c*/
 
 
 #include <exec/types.h>
@@ -34,89 +34,63 @@
 
 #include "suspend.h"
 #include "stabs.h"
-#include "gui.h"
-#include "variables.h"
-#include "globals.h"
+#include "breakpoints.h"
+#include "breakpointswindow.h"
 
 enum
 {
-	GLOBALS_BUTTON = 1,
-	GLOBALS_LISTBROWSER
+	BREAKPOINTS_BUTTON = 1,
+	BREAKPOINTS_LISTBROWSER
 };
 
-Object *GlobalsWinObj, *GlobalsButtonObj, *GlobalsListBrowserObj;
-struct Window *globalswin;
-BOOL globals_window_is_open = FALSE;
+Object *BreakpointsWinObj, *BreakpointsButtonObj, *BreakpointsListBrowserObj;
+struct Window *breakpointswin;
 
-struct List globalslist;
+struct List breakpointslist;
+BOOL breakpoints_window_is_open = FALSE;
 
 
-void globals_update_window()
+struct stab_function *breakpoints_get_selected_function(uint32 selected)
 {
-	if (!globals_window_is_open)
-		return;
+	struct stab_function *f = (struct stab_function *)IExec->GetHead(&function_list);
+	int i;
+	for (i = 0; i < selected; i++)
+		f = (struct stab_function *)IExec->GetSucc ((struct Node *)f);
 
+	return f;
+}
+
+
+void breakpoints_makelist()
+{
 	struct Node *node;
+	struct stab_function *f = (struct stab_function *)IExec->GetHead(&function_list);
 
-	IExec->NewList (&globalslist);
-
-	struct List *l = &(global_symbols);
-	struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
-
-	if (s)
-	while (1)
+	IExec->NewList (&breakpointslist);
+	while(f)
 	{
-		char *str = print_variable_value(s);
-		char *namestr = IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
-
-		if (s->type && s->type->type == T_POINTER)
-			sprintf(namestr, "*%s", s->name);
-		else
-			sprintf(namestr, "%s", s->name);
-
 		if (node = IListBrowser->AllocListBrowserNode(2,
             									LBNA_Column, 0,
-                								LBNCA_Text, namestr,
-												LBNA_Column, 1,
-												LBNCA_Text, str,
+                								LBNCA_Text, f->name,
             									TAG_DONE))
         							{
-							            IExec->AddTail(&globalslist, node);
+							            IExec->AddTail(&breakpointslist, node);
 									}
-		if ((struct Node *)s == IExec->GetTail(l))
-			break;
-		s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
+		f = (struct stab_function *)IExec->GetSucc ((struct Node *)f);
 	}
-
-	if (globals_window_is_open)
-		IIntuition->RefreshGadgets ((struct Gadget *)GlobalsListBrowserObj, globalswin, NULL);
 }
 
-void globals_destroy_list()
+void breakpoints_open_window()
 {
-	IExec->NewList (&global_symbols);
-}
-
-void globals_open_window()
-{
-	if (globals_window_is_open)
+	if (breakpoints_window_is_open)
 		return;
 
-	IExec->NewList (&globalslist);
-
-    struct ColumnInfo *columninfo = IListBrowser->AllocLBColumnInfo(2,
-        LBCIA_Column, 0,
-            LBCIA_Title, "Variable",
-            LBCIA_Width, 80,
-        LBCIA_Column, 1,
-            LBCIA_Title, "Value",
-        TAG_DONE);
-
+	breakpoints_makelist();
 
     /* Create the window object. */
-    if(( GlobalsWinObj = WindowObject,
+    if(( BreakpointsWinObj = WindowObject,
             WA_ScreenTitle, "Debug 101",
-            WA_Title, "Globals",
+            WA_Title, "Select breakpoint",
             WA_Width, 400,
 			WA_Height, 400,
             WA_DepthGadget, TRUE,
@@ -133,58 +107,61 @@ void globals_open_window()
                 LAYOUT_SpaceOuter, TRUE,
                 LAYOUT_DeferLayout, TRUE,
 
-	            LAYOUT_AddChild, GlobalsListBrowserObj = ListBrowserObject,
-    	            GA_ID,                     GLOBALS_LISTBROWSER,
+	            LAYOUT_AddChild, BreakpointsListBrowserObj = ListBrowserObject,
+    	            GA_ID,                     BREAKPOINTS_LISTBROWSER,
         	        GA_RelVerify,              TRUE,
             	    GA_TabCycle,               TRUE,
                 	LISTBROWSER_AutoFit,       TRUE,
-                    LISTBROWSER_Labels,        &globalslist,
-                    LISTBROWSER_ColumnInfo,    columninfo,
+                    LISTBROWSER_Labels,        &breakpointslist,
+//                    LISTBROWSER_ColumnInfo,    columninfo,
               	    LISTBROWSER_ColumnTitles,  TRUE,
                 	LISTBROWSER_ShowSelected,  TRUE,
                     LISTBROWSER_Striping,      LBS_ROWS,
 				ListBrowserEnd,
 
-                LAYOUT_AddChild, GlobalsButtonObj = ButtonObject,
-                    GA_ID, GLOBALS_BUTTON,
+                LAYOUT_AddChild, BreakpointsButtonObj = ButtonObject,
+                    GA_ID, BREAKPOINTS_BUTTON,
 					GA_RelVerify, TRUE,
-                    GA_Text, "Done",
+                    GA_Text, "Select",
                 ButtonEnd,
                 CHILD_WeightedHeight, 0,
 			EndMember,
         EndWindow))
     {
         /*  Open the window. */
-        if( globalswin = (struct Window *) RA_OpenWindow(GlobalsWinObj) )
-		{
-        	globals_window_is_open = TRUE;
-			globals_update_window();
+        if( breakpointswin = (struct Window *) RA_OpenWindow(BreakpointsWinObj) )
+        {
+			breakpoints_window_is_open = TRUE;
 		}
 	}
 }
 
-uint32 globals_obtain_window_signal()
+
+uint32 breakpoints_obtain_window_signal()
 {
 	uint32 signal = 0x0;
-	if (globals_window_is_open)
-		IIntuition->GetAttr( WINDOW_SigMask, GlobalsWinObj, &signal );
+	if (breakpoints_window_is_open)
+		IIntuition->GetAttr( WINDOW_SigMask, BreakpointsWinObj, &signal );
 
 	return signal;
 }
 
 
-void globals_event_handler()
+
+void breakpoints_event_handler()
 {
             ULONG wait, signal, result, done = FALSE;
             WORD Code;
             CONST_STRPTR hintinfo;
 			uint32 selected;
-            
+            struct stab_function *f;
+
             /* Obtain the window wait signal mask. */
             //IIntuition->GetAttr( WINDOW_SigMask, WinObj, &signal );
             
+            /* Input Event Loop */
 
-                while ((result = RA_HandleInput(GlobalsWinObj, &Code)) != WMHI_LASTMSG)
+                while ((result = RA_HandleInput(BreakpointsWinObj, &Code)) != WMHI_LASTMSG)
                 {
                     switch (result & WMHI_CLASSMASK)
                     {
@@ -194,7 +171,23 @@ void globals_event_handler()
                          case WMHI_GADGETUP:
                             switch(result & WMHI_GADGETMASK)
                             {
-                                case GLOBALS_BUTTON:
+                                case BREAKPOINTS_BUTTON:
+                                    /* if the user has entered a new text for the buttons
+                                    ** help text, get it, and set it
+                                    */
+                                    IIntuition->GetAttrs( BreakpointsListBrowserObj,
+															LISTBROWSER_Selected, &selected, TAG_DONE );
+
+									if (selected != 0x7fffffff)
+									{
+										f = breakpoints_get_selected_function(selected);
+printf("f->name = %s\n", f->name);
+										if (f)
+										{
+											pause();
+											insert_breakpoint (f->address, BR_NORMAL);
+										}
+									}
 
 									done = TRUE;
                                     break;
@@ -203,27 +196,24 @@ void globals_event_handler()
                     }
 					if (done)
 					{
-						globals_close_window();
+						breakpoints_close_window();
 						break;
 					}
                 }
 }
 
-void globals_close_window()
+void breakpoints_close_window()
 {
-	if (globals_window_is_open)
+	if (breakpoints_window_is_open)
 	{
         /* Disposing of the window object will
          * also close the window if it is
          * already opened and it will dispose of
          * all objects attached to it.
          */
-        IIntuition->DisposeObject( GlobalsWinObj );
+        IIntuition->DisposeObject( BreakpointsWinObj );
 
-		globals_window_is_open = FALSE;
+		breakpoints_window_is_open = FALSE;
     }
-    
-    return;
-
 }
 

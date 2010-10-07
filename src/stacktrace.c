@@ -60,6 +60,9 @@ extern struct DebugIFace *IDebug;
 
 void stacktrace_update()
 {
+	if (!stacktrace_window_is_open)
+		return;
+
 	IExec->NewList (&stacktracelist);
 	if (!task_exists)
 		return;
@@ -72,19 +75,6 @@ void stacktrace_update()
 
 	uint32 p = stackpointer;
 
-	stabs_make_function_list();
-	uint32 temp;
-	for (temp = stackpointer; temp < stackupper-28; temp+=4)
-	{
-		if (*(uint32*)temp == function_addresses[1])
-		{
-			printf("HIT at offset 0x%x\n", temp-stackpointer);
-		}
-	}
-	int a;
-	for (a = 0; a < numberoffunctions; a++)
-		printf("function %d at 0x%x\n", a, function_addresses[a]);
-
 	int i = 0;
 	while (p < stackupper-28)
 	{
@@ -92,7 +82,10 @@ void stacktrace_update()
 		char *str = (char*)IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
 
 		//first try the stabs functions:
-		char *fname = stabs_get_function_for_address (*(uint32*)(p+0x30));
+		struct stab_function *f = stabs_get_function_from_address (*(uint32*)(p+4));
+		char *fname = NULL;
+		if (f && f->name)
+			fname = f->name;
 		if (!fname)
 		{
 			//try the symbol table:
@@ -106,8 +99,7 @@ void stacktrace_update()
 		if (!fname)
 			fname = "<unknown function>";
 
-		sprintf(str, "0x%x: %s", p-stackpointer, fname);
-		p = *(uint32*)p;
+		sprintf(str, "0x%x (%d): %s", p-stackpointer, i, fname);
 
 		if (node = IListBrowser->AllocListBrowserNode(2,
             									LBNA_Column, 0,
@@ -116,6 +108,7 @@ void stacktrace_update()
         							{
 							            IExec->AddTail(&stacktracelist, node);
 									}
+		p = *(uint32*)p;
 	}
 
 	if (stacktrace_window_is_open)
@@ -129,12 +122,9 @@ void stacktrace_open_window()
 	if (stacktrace_window_is_open)
 		return;
 
+	IExec->NewList (&stacktracelist);
+
 	pause();
-
-	//if(!hasfunctioncontext)
-	//	return;
-
-	stacktrace_update();
 
     /* Create the window object. */
     if(( StacktraceWinObj = WindowObject,
@@ -185,6 +175,7 @@ void stacktrace_open_window()
         if( stacktracewin = (struct Window *) RA_OpenWindow(StacktraceWinObj) )
 		{
         	stacktrace_window_is_open = TRUE;
+			stacktrace_update();
 		}
 	}
 }

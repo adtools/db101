@@ -1,9 +1,9 @@
 //#include <proto/dos.h>
 
-#include <stdio.h>
+//#include <stdio.h>
 
 typedef unsigned int mytype;
-typedef char *ptrtype;
+//typedef char *ptrtype;
 
 int globalvariable = 1234;
 

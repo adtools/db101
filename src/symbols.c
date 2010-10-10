@@ -34,12 +34,11 @@
 
 #include "suspend.h"
 #include "stabs.h"
+#include "symbols.h"
 
 
-int nosymbols = 0;
-char *symlist[1024];
-uint32 symval[1024];
-
+struct List symbols_list;
+BOOL has_symbols = FALSE;
 
 static ULONG amigaos_symbol_callback(struct Hook *, struct Task *, struct SymbolMsg *);
 
@@ -50,13 +49,13 @@ ULONG amigaos_symbol_callback(struct Hook *hook, struct Task *task, struct Symbo
 {
 	if (symbolmsg->Name)
 	{
-		char *storage = IExec->AllocMem(1024, MEMF_ANY|MEMF_CLEAR);
-		if (!storage)
+		struct amigaos_symbol *symbol = IExec->AllocMem(sizeof (struct amigaos_symbol), MEMF_ANY|MEMF_CLEAR);
+		if (!symbol)
 			printf("AllocMem failed!\n");
-		strcpy (storage, symbolmsg->Name);
-		symlist[nosymbols] = storage;
-		symval[nosymbols] = symbolmsg->AbsValue;
-		nosymbols++;
+		symbol->name = strdup (symbolmsg->Name);
+		symbol->value = symbolmsg->AbsValue;
+		//nosymbols++;
+		IExec->AddTail (&symbols_list, (struct Node *)symbol);
 	}
 	return 1;
 }
@@ -99,35 +98,54 @@ void close_elfhandle (Elf32_Handle handle)
 
 void get_symbols ()
 {
+	if (has_symbols)
+		free_symbols();
+	IExec->NewList (&symbols_list);
+
     symbol_hook.h_Entry = (ULONG (*)())amigaos_symbol_callback;
     symbol_hook.h_Data =  NULL;
 
-	//printf("calling ScanSymbolTable...\n");
+	printf("calling ScanSymbolTable...\n");
 	IElf->ScanSymbolTable (exec_elfhandle, &symbol_hook, NULL);
-	//printf("done!\n");
+	printf("done!\n");
+
+	has_symbols = TRUE;
 }
 
 void free_symbols ()
 {
-	int i;
-	for (i = 0; i < nosymbols; i++)
-		IExec->FreeMem (symlist[i], 1024);
-	nosymbols = 0;
+	if (!has_symbols)
+		return;
+	struct amigaos_symbol *symbol = (struct amigaos_symbol *)IExec->GetHead (&symbols_list);
+	while (symbol)
+	{
+		struct amigaos_symbol *next = (struct amigaos_symbol *)IExec->GetSucc ((struct Node *)symbol);
+		IExec->Remove ((struct Node *)symbol);
+		free (symbol->name);
+		IExec->FreeMem (symbol, sizeof(struct amigaos_symbol));
+		symbol = next;
+	}
+	has_symbols = FALSE;
 }
 
 void list_symbols ()
 {
-	int i;
-	for ( i = 0; i < nosymbols; i++)
-		printf (" \"%s\" = 0x%x\n", symlist[i], symval[i]);
+//	int i;
+//	for ( i = 0; i < nosymbols; i++)
+//		printf (" \"%s\" = 0x%x\n", symlist[i], symval[i]);
 }
 
 uint32 get_symval_from_name (char *name)
 {
-	int i;
-	for (i= 0; i < nosymbols; i++)
-		if(!strcmp(symlist[i], name))
-			return symval[i];
-	return -1;
+	if (!has_symbols)
+		return 0x0;
+	struct amigaos_symbol *s = (struct amigaos_symbol *)IExec->GetHead (&symbols_list);
+	while (s)
+	{
+		if (!strcmp(name, s->name))
+			return s->value;
+		s = (struct amigaos_symbol *)IExec->GetSucc ((struct Node *)s);
+	}
+	return 0x0;
 }
 

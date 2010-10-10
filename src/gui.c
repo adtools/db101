@@ -580,6 +580,8 @@ void event_loop()
 					IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
 
 					globals_destroy_list();
+					free_symbols();
+
 					globals_close_window();
 					registers_close_window();
 					hex_close_window();
@@ -637,6 +639,9 @@ void cleanup()
 	remove_hook();
 	if (!isattached)
 		killtask();
+
+	free_symbols();
+
 	registers_close_window();
 	locals_close_window();
 	hex_close_window();

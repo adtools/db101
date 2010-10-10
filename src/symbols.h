@@ -11,5 +11,12 @@ uint32 get_symval_from_name (char *);
 Elf32_Handle open_elfhandle(void);
 void close_elfhandle (Elf32_Handle);
 
-char *symlist[1024];
-uint32 symval;
+extern struct List symbols_list;
+//uint32 symval;
+
+struct amigaos_symbol
+{
+	struct Node node;
+	char *name;
+	uint32 value;
+};

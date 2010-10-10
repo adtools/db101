@@ -488,7 +488,7 @@ void stabs_interpret_globals()
 			strptr = skip_in_string (strptr, ":");
 			symbol->type = stabs_get_type_from_string(strptr, sourcefile);
 			symbol->address = get_symval_from_name(symbol->name);
-
+printf("global variable %s at address 0x%x\n", symbol->name, symbol->address);
 			IExec->AddTail(l, (struct Node *)symbol);
 
 			break;

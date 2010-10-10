@@ -105,9 +105,9 @@ void get_symbols ()
     symbol_hook.h_Entry = (ULONG (*)())amigaos_symbol_callback;
     symbol_hook.h_Data =  NULL;
 
-	printf("calling ScanSymbolTable...\n");
+	//printf("calling ScanSymbolTable...\n");
 	IElf->ScanSymbolTable (exec_elfhandle, &symbol_hook, NULL);
-	printf("done!\n");
+	//printf("done!\n");
 
 	has_symbols = TRUE;
 }

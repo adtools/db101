@@ -54,6 +54,8 @@ BOOL disassembler_window_is_open = FALSE;
 int32 disassembler_selected = 0;
 
 struct List assemblelist;
+BOOL has_disassembler_list = FALSE;
+struct List asm_freelist;
 
 int noinstructions = 0;
 char opcodelist[1024][15];
@@ -81,6 +83,9 @@ void disassembler_makelist()
 	if (!disassembler_window_is_open)
 		return;
 
+	if (has_disassembler_list)
+		freelist (&asm_freelist);
+
 	struct Node *node;
 	IExec->NewList (&assemblelist);
 	int i;
@@ -89,6 +94,7 @@ void disassembler_makelist()
 	for (i = 0; i < 1024; i++)
 	{
 		char *str = IExec->AllocMem (50, MEMF_ANY|MEMF_CLEAR);
+		add_freelist (&asm_freelist, 50, str);
 
 		APTR newaddress = IDebug->DisassembleNative (address, opcodelist[i], operandlist[i]);
 
@@ -106,7 +112,7 @@ void disassembler_makelist()
 
 		address = newaddress;
 
-		if ((uint32) (address - current_function->address) == current_function->size)
+		if ((uint32) (address - current_function->address) >= current_function->size)
 			break;
 	}
 	if (disassembler_window_is_open)
@@ -116,7 +122,14 @@ void disassembler_makelist()
 	}
 }
 
-
+void disassembler_freelist()
+{
+	if (has_disassembler_list)
+	{
+		freelist (asm_freelist);
+		has_disassembler_list = FALSE;
+	}
+}
 
 void disassembler_open_window()
 {
@@ -126,6 +139,7 @@ void disassembler_open_window()
 	if(!hasfunctioncontext)
 		return;
 
+	IExec->NewList (&asm_freelist);
 	IExec->NewList (&assemblelist);
 
     /* Create the window object. */
@@ -257,6 +271,8 @@ void disassembler_close_window()
          * all objects attached to it.
          */
         IIntuition->DisposeObject( DisassemblerWinObj );
+		IListBrowser->FreeListBrowserList(&assemblelist);
+		disassembler_freelist();
 
 		disassembler_window_is_open = FALSE;
     }

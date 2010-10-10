@@ -204,6 +204,7 @@ struct Process *attach_select_process()
          * all objects attached to it.
          */
         IIntuition->DisposeObject( WinObj );
+		IListBrowser->FreeListBrowserList(&attachlist);
     }
 
 	//free_process_list();

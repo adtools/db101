@@ -36,6 +36,7 @@
 #include "suspend.h"
 #include "symbols.h"
 #include "hexview.h"
+#include "freemem.h"
 
 enum
 {
@@ -53,6 +54,8 @@ BOOL hex_window_is_open = FALSE;
 struct List hexlist;
 char *sectionlist[1024] = { NULL };
 uint32 hex_numsections;
+
+struct List hex_freelist;
 
 struct TextAttr courier_font =
 {
@@ -149,6 +152,8 @@ void hex_load_section (int index)
 	for (i = 0; i < size; i += 16, dptr += 4)
 	{
 		string = IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
+		add_freelist (&hex_freelist, 1024, string);
+
 		if (i - size < 16)
 		{
 			sprintf(string, "<dummy>");
@@ -183,6 +188,7 @@ void hex_load_section (int index)
 
 void hex_free_section()
 {
+	freelist(&hex_freelist);
 }
 
 
@@ -193,6 +199,8 @@ void hex_open_window()
 
 	if (!task_exists)
 		return;
+
+	IExec->NewList (&hex_freelist);
 
 	hex_init_section_list ();
 	hex_load_section (0);

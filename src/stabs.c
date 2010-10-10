@@ -38,6 +38,10 @@ struct List global_symbols;
 struct List sourcefile_list;
 struct List function_list;
 
+BOOL stabs_has_functions = FALSE;
+BOOL stabs_has_sourcefiles = FALSE;
+BOOL stabs_has_globals = FALSE;
+
 struct stab_function *stabs_get_function_from_address (uint32 faddress)
 {
 	struct stab_function *f = (struct stab_function *)IExec->GetHead (&function_list);
@@ -82,6 +86,8 @@ void stabs_interpret_functions ()
 	struct stab_function *f;
 
 	IExec->NewList (&function_list);
+	stabs_has_functions = TRUE;
+
 
 	while ((uint32)sym < (uint32)stab + stabsize - sizeof (struct symtab_entry))
 	{
@@ -170,6 +176,36 @@ void stabs_interpret_functions ()
 		sym++;
 	}
 }
+
+void stabs_free_functions()
+{
+	if (!stabs_has_functions)
+		return;
+
+	struct stab_function *f = (struct stab_function *)IExec->GetHead (&function_list);
+	while (f)
+	{
+		struct stab_function *fnext = (struct stab_function *)IExec->GetSucc((struct Node *)f);
+		IExec->Remove ((struct Node*)f);
+
+		//free symbols:
+		struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (&(f->symbols));
+		while (s)
+		{
+			struct stab_symbol *snext = (struct stab_symbol *)IExec->GetSucc ((struct Node*)s);
+
+			IExec->Remove ((struct Node *)s);
+			IExec->FreeMem (s, sizeof (struct stab_symbol));
+
+			s = snext;
+		}
+
+		IExec->FreeMem (f, sizeof(struct stab_function));
+		f = fnext;
+	}
+	stabs_has_functions = FALSE;
+}
+
 
 char *skip_in_string (char *source, char *pattern)
 {
@@ -450,6 +486,36 @@ void stabs_interpret_typedefs()
 	}
 }
 
+void stabs_free_typedefs()
+{
+	if (!stabs_has_sourcefiles)
+		return;
+
+	struct stab_sourcefile *f = (struct stab_sourcefile *)IExec->GetHead (&sourcefile_list);
+	while (f)
+	{
+		struct stab_sourcefile *fnext = (struct stab_sourcefile *)IExec->GetSucc((struct Node *)f);
+		IExec->Remove ((struct Node*)f);
+
+		//free symbols:
+		struct stab_typedef *t = (struct stab_typedef *)IExec->GetHead (&(f->typedef_list));
+		while (t)
+		{
+			struct stab_typedef *tnext = (struct stab_typedef *)IExec->GetSucc ((struct Node*)t);
+
+			IExec->Remove ((struct Node *)t);
+			IExec->FreeMem (t, sizeof (struct stab_typedef));
+
+			t = tnext;
+		}
+
+		IExec->FreeMem (f, sizeof(struct stab_sourcefile));
+		f = fnext;
+	}
+	stabs_has_sourcefiles = FALSE;
+}
+
+
 void stabs_interpret_globals()
 {
 	IExec->NewList(&global_symbols);
@@ -488,7 +554,7 @@ void stabs_interpret_globals()
 			strptr = skip_in_string (strptr, ":");
 			symbol->type = stabs_get_type_from_string(strptr, sourcefile);
 			symbol->address = get_symval_from_name(symbol->name);
-printf("global variable %s at address 0x%x\n", symbol->name, symbol->address);
+
 			IExec->AddTail(l, (struct Node *)symbol);
 
 			break;
@@ -497,3 +563,22 @@ printf("global variable %s at address 0x%x\n", symbol->name, symbol->address);
 	}
 }
 
+void stabs_free_globals()
+{
+	if (!stabs_has_globals)
+		return;
+
+		//free symbols:
+		struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (&global_symbols);
+		while (s)
+		{
+			struct stab_symbol *snext = (struct stab_symbol *)IExec->GetSucc ((struct Node*)s);
+
+			IExec->Remove ((struct Node *)s);
+			IExec->FreeMem (s, sizeof (struct stab_symbol));
+
+			s = snext;
+		}
+
+	stabs_has_globals = FALSE;
+}

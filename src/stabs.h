@@ -94,6 +94,9 @@ extern struct stab_function *stabs_get_function_from_name (char *);
 void stabs_interpret_functions(void);
 void stabs_interpret_typedefs(void);
 void stabs_interpret_globals(void);
+void stabs_free_functions(void);
+void stabs_free_typedefs(void);
+void stabs_free_globals(void);
 
 extern char *stabs_strdup_strip(char *);
 char *skip_in_string (char *, char *);

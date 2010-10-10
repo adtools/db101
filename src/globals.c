@@ -37,6 +37,7 @@
 #include "gui.h"
 #include "variables.h"
 #include "globals.h"
+#include "freemem.h"
 
 enum
 {
@@ -46,10 +47,13 @@ enum
 
 Object *GlobalsWinObj, *GlobalsButtonObj, *GlobalsListBrowserObj;
 struct Window *globalswin;
+struct ColumnInfo *globalscolumninfo;
 BOOL globals_window_is_open = FALSE;
 
 struct List globalslist;
 
+struct List glob_freelist;
+BOOL has_globals_list = FALSE;
 
 void globals_update_window()
 {
@@ -57,6 +61,9 @@ void globals_update_window()
 		return;
 
 	struct Node *node;
+
+	if (has_globals_list)
+		globals_freelist();
 
 	IExec->NewList (&globalslist);
 
@@ -67,7 +74,9 @@ void globals_update_window()
 	while (1)
 	{
 		char *str = print_variable_value(s);
+		add_freelist (&glob_freelist, 256, str);
 		char *namestr = IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
+		add_freelist (&glob_freelist, 1024, namestr);
 
 		if (s->type && s->type->type == T_POINTER)
 			sprintf(namestr, "*%s", s->name);
@@ -88,13 +97,16 @@ void globals_update_window()
 		s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
 	}
 
+	has_globals_list = TRUE;
+
 	if (globals_window_is_open)
 		IIntuition->RefreshGadgets ((struct Gadget *)GlobalsListBrowserObj, globalswin, NULL);
 }
 
-void globals_destroy_list()
+void globals_freelist()
 {
-	IExec->NewList (&global_symbols);
+	if (has_globals_list)
+		freelist (&glob_freelist);
 }
 
 void globals_open_window()
@@ -102,9 +114,10 @@ void globals_open_window()
 	if (globals_window_is_open)
 		return;
 
+	IExec->NewList (&glob_freelist);
 	IExec->NewList (&globalslist);
 
-    struct ColumnInfo *columninfo = IListBrowser->AllocLBColumnInfo(2,
+    globalscolumninfo = IListBrowser->AllocLBColumnInfo(2,
         LBCIA_Column, 0,
             LBCIA_Title, "Variable",
             LBCIA_Width, 80,
@@ -139,7 +152,7 @@ void globals_open_window()
             	    GA_TabCycle,               TRUE,
                 	LISTBROWSER_AutoFit,       TRUE,
                     LISTBROWSER_Labels,        &globalslist,
-                    LISTBROWSER_ColumnInfo,    columninfo,
+                    LISTBROWSER_ColumnInfo,    globalscolumninfo,
               	    LISTBROWSER_ColumnTitles,  TRUE,
                 	LISTBROWSER_ShowSelected,  TRUE,
                     LISTBROWSER_Striping,      LBS_ROWS,
@@ -219,6 +232,9 @@ void globals_close_window()
          * all objects attached to it.
          */
         IIntuition->DisposeObject( GlobalsWinObj );
+
+		globals_freelist();
+		IListBrowser->FreeLBColumnInfo(globalscolumninfo);
 
 		globals_window_is_open = FALSE;
     }

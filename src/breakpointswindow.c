@@ -47,6 +47,7 @@ Object *BreakpointsWinObj, *BreakpointsButtonObj, *BreakpointsListBrowserObj;
 struct Window *breakpointswin;
 
 struct List breakpointslist;
+BOOL has_breakpoints_list = FALSE;
 BOOL breakpoints_window_is_open = FALSE;
 
 
@@ -66,6 +67,9 @@ void breakpoints_makelist()
 	struct Node *node;
 	struct stab_function *f = (struct stab_function *)IExec->GetHead(&function_list);
 
+	if (has_breakpoints_list)
+		breakpoints_freelist();
+
 	IExec->NewList (&breakpointslist);
 	while(f)
 	{
@@ -78,7 +82,18 @@ void breakpoints_makelist()
 									}
 		f = (struct stab_function *)IExec->GetSucc ((struct Node *)f);
 	}
+	has_breakpoints_list = TRUE;
 }
+
+void breakpoints_freelist()
+{
+	if (has_breakpoints_list)
+	{
+		IListBrowser->FreeListBrowserList(&breakpointslist);
+		has_breakpoints_list = FALSE;
+	}
+}
+
 
 void breakpoints_open_window()
 {
@@ -181,7 +196,7 @@ void breakpoints_event_handler()
 									if (selected != 0x7fffffff)
 									{
 										f = breakpoints_get_selected_function(selected);
-printf("f->name = %s\n", f->name);
+
 										if (f)
 										{
 											pause();
@@ -213,6 +228,7 @@ void breakpoints_close_window()
          */
         IIntuition->DisposeObject( BreakpointsWinObj );
 
+		breakpoints_freelist();
 		breakpoints_window_is_open = FALSE;
     }
 }

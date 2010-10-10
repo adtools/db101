@@ -36,6 +36,7 @@
 #include "stabs.h"
 #include "gui.h"
 #include "variables.h"
+#include "freemem.h"
 
 enum
 {
@@ -48,6 +49,11 @@ struct Window *localswin;
 BOOL locals_window_is_open = FALSE;
 
 struct List variablelist;
+struct ColumnInfo *localscolumninfo;
+BOOL has_variable_list = FALSE;
+
+struct List loc_freelist;
+
 
 BOOL is_readable_address (uint32 addr)
 {
@@ -73,7 +79,8 @@ BOOL is_readable_address (uint32 addr)
 
 char *print_variable_value(struct stab_symbol *s)
 {
-	char *ret = malloc (256);
+	char *ret = IExec->AllocMem (256, MEMF_ANY|MEMF_CLEAR);
+
 	uint32 buffer = 0x0;
 	uint32 addr = 0x0;
 
@@ -165,9 +172,11 @@ char *print_variable_value(struct stab_symbol *s)
 			break;
 
 		default:
-
-			strcpy (ret, "UNKNOWN");
-
+			{
+			//if we can't get the type, just print hex:
+			uint32 unknownu32 = *(uint32*)addr;
+			sprintf(ret, "%u (UNKNOWN)", unknownu32);
+			}
 			break;
 		}
 
@@ -181,6 +190,9 @@ void locals_update_window()
 
 	struct Node *node;
 
+	if (has_variable_list)
+		locals_freelist();
+
 	IExec->NewList (&variablelist);
 
 	struct List *l = &(current_function->symbols);
@@ -190,7 +202,9 @@ void locals_update_window()
 	while (1)
 	{
 		char *str = print_variable_value(s);
+		add_freelist (&loc_freelist, 256, str);
 		char *namestr = IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
+		add_freelist (&loc_freelist, 1024, namestr);
 
 		if (s->type && s->type->type == T_POINTER)
 			sprintf(namestr, "*%s", s->name);
@@ -210,10 +224,24 @@ void locals_update_window()
 			break;
 		s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
 	}
+	has_variable_list = TRUE;
 
 	if (locals_window_is_open)
 		IIntuition->RefreshGadgets ((struct Gadget *)LocalsListBrowserObj, localswin, NULL);
 }
+
+void locals_freelist()
+{
+	/* TODO: free strings */
+	if(has_variable_list)
+	{
+		IListBrowser->FreeListBrowserList(&variablelist);
+
+		freelist (&loc_freelist);
+		has_variable_list = FALSE;
+	}
+}
+
 
 void locals_open_window()
 {
@@ -224,8 +252,9 @@ void locals_open_window()
 		return;
 
 	IExec->NewList (&variablelist);
+	IExec->NewList (&loc_freelist);
 
-    struct ColumnInfo *columninfo = IListBrowser->AllocLBColumnInfo(2,
+    localscolumninfo = IListBrowser->AllocLBColumnInfo(2,
         LBCIA_Column, 0,
             LBCIA_Title, "Variable",
             LBCIA_Width, 80,
@@ -260,7 +289,7 @@ void locals_open_window()
             	    GA_TabCycle,               TRUE,
                 	LISTBROWSER_AutoFit,       TRUE,
                     LISTBROWSER_Labels,        &variablelist,
-                    LISTBROWSER_ColumnInfo,    columninfo,
+                    LISTBROWSER_ColumnInfo,    localscolumninfo,
               	    LISTBROWSER_ColumnTitles,  TRUE,
                 	LISTBROWSER_ShowSelected,  TRUE,
                     LISTBROWSER_Striping,      LBS_ROWS,
@@ -340,6 +369,9 @@ void locals_close_window()
          * all objects attached to it.
          */
         IIntuition->DisposeObject( LocalsWinObj );
+
+		locals_freelist();
+		IListBrowser->FreeLBColumnInfo(localscolumninfo);
 
 		locals_window_is_open = FALSE;
     }

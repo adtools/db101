@@ -37,6 +37,7 @@
 #include "stacktrace.h"
 #include "attach.h"
 #include "breakpointswindow.h"
+#include "freemem.h"
 
 enum
 {
@@ -78,6 +79,8 @@ char childpath[1024] = "";
 struct stab_function *current_function = NULL;
 BOOL hasfunctioncontext = FALSE;
 BOOL isattached = FALSE;
+
+struct List main_freelist;
 
 char *request_file (struct Window *win, char **path)
 {
@@ -176,11 +179,12 @@ char *getlinefromfile (int line)
 		sprintf(fullpath, "%s/%s", childpath, current_function->sourcename);
 
 
+	ret = IExec->AllocMem(1024, MEMF_ANY|MEMF_CLEAR);
+	add_freelist (&main_freelist, 1024, ret);
+
 	FILE *stream = fopen (fullpath, "r");
 	if (stream)
 	{
-		ret = IExec->AllocMem(1024, MEMF_ANY|MEMF_CLEAR);
-
 		int i;
 		for(i = 1; ; i++)
 		{
@@ -192,7 +196,7 @@ char *getlinefromfile (int line)
 		fclose (stream);
 	}
 	else
-		return  "-- no source file --";
+		sprintf(ret,  "-- <%s> --", current_function->sourcename);
 
 	strip_for_tabs(ret);
 	return ret;
@@ -224,7 +228,10 @@ void output_lineinfile (uint32 line)
 {
 	struct Node *node;
 	char *strline = getlinefromfile(line);
-	char *numberstr = malloc (256);
+
+	char *numberstr = IExec->AllocMem (256, MEMF_ANY|MEMF_CLEAR);
+	add_freelist (&main_freelist, 256, numberstr);
+
 	sprintf(numberstr, "%d", line);
 
 	if (current_function->currentline == 0)
@@ -245,10 +252,11 @@ void output_lineinfile (uint32 line)
 
 void free_list()
 {
-		/* yeah I know, this is not the right way to do things...*/
+	/* TODO: free separate strings in list */
 
-		IExec->NewList (&listbrowser_list);
-		IIntuition->RefreshGadgets ((struct Gadget *)ListBrowserObj, mainwin, NULL);
+	IListBrowser->FreeListBrowserList(&listbrowser_list);
+
+	freelist(&main_freelist);
 }
 
 uint32 main_obtain_window_signal()
@@ -288,7 +296,7 @@ void main_open_window()
         TAG_DONE);
 
 	IExec->NewList (&listbrowser_list);
-
+	IExec->NewList (&main_freelist);
 
     /* Create the window object. */
     if(( MainWinObj = WindowObject,
@@ -579,8 +587,10 @@ void event_loop()
 					button_setdisabled (DisassembleviewButtonObj, TRUE);
 					IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
 
-					globals_destroy_list();
 					free_symbols();
+					stabs_free_functions();
+					stabs_free_typedefs();
+					stabs_free_globals();
 
 					globals_close_window();
 					registers_close_window();
@@ -641,6 +651,9 @@ void cleanup()
 		killtask();
 
 	free_symbols();
+	stabs_free_functions();
+	stabs_free_globals();
+	stabs_free_typedefs();
 
 	registers_close_window();
 	locals_close_window();
@@ -830,6 +843,9 @@ void main_event_handler()
 								case GAD_X_BUTTON:
 
 									free_list();
+									IExec->NewList (&listbrowser_list);
+									IIntuition->RefreshGadgets ((struct Gadget *)ListBrowserObj, mainwin, NULL);
+
 									break;
 
 								case GAD_HEX_BUTTON:
@@ -881,6 +897,9 @@ void main_close_window()
          * all objects attached to it.
          */
         IIntuition->DisposeObject( MainWinObj );
+
+		free_list();
+		IListBrowser->FreeLBColumnInfo(columninfo);
 
 		main_window_is_open = FALSE;
     }

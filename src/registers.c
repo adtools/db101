@@ -50,7 +50,7 @@ struct Window *registerwin;
 BOOL registers_window_is_open = FALSE;
 
 
-extern struct ExceptionContext *context_ptr;
+//extern struct ExceptionContext *context_ptr;
 
 
 struct List reglist;
@@ -239,7 +239,10 @@ void registers_close_window()
          * all objects attached to it.
          */
         IIntuition->DisposeObject( RegisterWinObj );
-	
+
+        IListBrowser->FreeListBrowserList(&reglist);
+        IListBrowser->FreeLBColumnInfo(regcolumninfo);
+
 		registers_window_is_open = FALSE;
     }
     return;

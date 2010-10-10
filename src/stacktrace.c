@@ -38,7 +38,7 @@
 #include "stabs.h"
 #include "gui.h"
 #include "stacktrace.h"
-
+#include "freemem.h"
 
 enum
 {
@@ -57,15 +57,22 @@ extern struct DebugIFace *IDebug;
 
 #define MAX(a, b)  (a>b?a:b)
 
+struct List stack_freelist;
+BOOL has_stack_freelist = FALSE;
+
 
 void stacktrace_update()
 {
 	if (!stacktrace_window_is_open)
 		return;
 
-	IExec->NewList (&stacktracelist);
 	if (!task_exists)
 		return;
+
+	if (has_stack_freelist)
+		stacktrace_freelist();
+
+	IExec->NewList (&stacktracelist);
 
 	struct Task *t = (struct Task *)process;
 	struct Node *node;
@@ -80,6 +87,7 @@ void stacktrace_update()
 	{
 		i++;
 		char *str = (char*)IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
+		add_freelist(&stack_freelist, 1024, str);
 
 		//first try the stabs functions:
 		struct stab_function *f = stabs_get_function_from_address (*(uint32*)(p+4));
@@ -111,10 +119,20 @@ void stacktrace_update()
 		p = *(uint32*)p;
 	}
 
+	has_stack_freelist = TRUE;
+
 	if (stacktrace_window_is_open)
 		IIntuition->RefreshGadgets ((struct Gadget *)StacktraceListBrowserObj, stacktracewin, NULL);
 }
 
+void stacktrace_freelist()
+{
+	if (has_stack_freelist)
+	{
+		freelist(&stack_freelist);
+		has_stack_freelist = FALSE;
+	}
+}
 
 
 void stacktrace_open_window()
@@ -122,6 +140,7 @@ void stacktrace_open_window()
 	if (stacktrace_window_is_open)
 		return;
 
+	IExec->NewList (&stack_freelist);
 	IExec->NewList (&stacktracelist);
 
 	pause();

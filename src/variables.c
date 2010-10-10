@@ -85,7 +85,10 @@ char *print_variable_value(struct stab_symbol *s)
 	uint32 addr = 0x0;
 
 	if (s->type == NULL)
-		return "UNKNOWN";
+	{
+		strcpy (ret, "UNKNOWN");
+		return ret;
+	}
 
 	switch (s->location)
 	{

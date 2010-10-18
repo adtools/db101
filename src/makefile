@@ -66,10 +66,14 @@ breakpointswindow.o: breakpointswindow.c breakpointswindow.h stabs.h suspend.h
 freemem.o: freemem.c freemem.h
 	$(CC) -c -gstabs -o freemem.o freemem.c
 
+arexxport.o: arexxport.c arexxport.h suspend.h
+	$(CC) -c -gstabs -o arexxport.o arexxport.c
+
+
 ../db101: suspend.o symbols.o gui.o hexview.o \
 			stabs.o variables.o registers.o \
 			disassembler.o main.o breakpoints.o stacktrace.o globals.o attach.o breakpointswindow.o \
-			freemem.o
+			freemem.o arexxport.o
 	$(CC) -gstabs main.o suspend.o symbols.o gui.o hexview.o stabs.o variables.o globals.o \
 			registers.o disassembler.o breakpoints.o stacktrace.o attach.o \
-			breakpointswindow.o freemem.o -lauto -o ../db101
+			breakpointswindow.o freemem.o arexxport.o -lauto -o ../db101

@@ -38,6 +38,7 @@
 #include "attach.h"
 #include "breakpointswindow.h"
 #include "freemem.h"
+#include "arexxport.h"
 
 enum
 {
@@ -280,6 +281,7 @@ uint32 obtain_all_signals()
 	signal |= stacktrace_obtain_window_signal();
 	signal |= globals_obtain_window_signal();
 	signal |= breakpoints_obtain_window_signal();
+	signal |= arexx_obtain_signal();
 	signal |= debug_sigfield;
 
 	return signal;
@@ -632,6 +634,10 @@ void event_loop()
 				{
 					breakpoints_event_handler();
 				}
+				if (wait & arexx_obtain_signal())
+				{
+					arexx_event_handler();
+				}
 				if (shouldplay)
 				{
 					play();
@@ -663,8 +669,86 @@ void cleanup()
 	disassembler_close_window();
 	breakpoints_close_window();
 	main_close_window();
+	arexx_close_port();
 }
 
+void main_play()
+{
+	if (is_breakpoint_at(context_copy.ip))
+	{
+		should_continue = TRUE;
+		asmstep();
+	}
+	else
+	{
+		install_all_breakpoints();
+
+		button_setdisabled (StartButtonObj, TRUE);
+		button_setdisabled (PauseButtonObj, FALSE);
+		button_setdisabled (StepButtonObj, TRUE);
+		button_setdisabled (KillButtonObj, FALSE);
+		button_setdisabled (CrashButtonObj, TRUE);
+		button_setdisabled (SelectButtonObj, TRUE);
+
+		play();
+	}
+}
+
+void main_pause()
+{
+	button_setdisabled (StartButtonObj, FALSE);
+	button_setdisabled (PauseButtonObj, TRUE);
+	button_setdisabled (StepButtonObj, TRUE);
+
+	pause();
+
+	registers_update_window();
+}
+
+void main_kill()
+{
+	button_setdisabled (StartButtonObj, TRUE);
+	button_setdisabled (PauseButtonObj, TRUE);
+	button_setdisabled (StepButtonObj, TRUE);
+	button_setdisabled (KillButtonObj, TRUE);
+	button_setdisabled (CrashButtonObj, TRUE);
+	button_setdisabled (SelectButtonObj, FALSE);
+	button_setdisabled (FilenameStringObj, TRUE);
+	//IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
+
+	killtask();
+
+	output_statement ("Program has been killed");
+}
+
+void main_load(char *name, char *path, char *args)
+{
+	if (!load_inferior (name, path, args))
+	{
+		output_statement ("New process loaded");
+
+		init_breakpoints();
+
+		stabs_interpret_typedefs();
+		stabs_interpret_functions();
+		get_symbols();
+		stabs_interpret_globals();
+		close_elfhandle(exec_elfhandle);
+
+		button_setdisabled (SelectButtonObj, TRUE);
+		button_setdisabled (StartButtonObj, FALSE);
+		button_setdisabled (KillButtonObj, FALSE);
+		button_setdisabled (CrashButtonObj, TRUE);
+		button_setdisabled (SetBreakButtonObj, FALSE);
+		button_setdisabled (FilenameStringObj, FALSE);
+		button_setdisabled (HexviewButtonObj, FALSE);
+		button_setdisabled (RegisterviewButtonObj, FALSE);
+
+		IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
+														STRINGA_TextVal, name,
+														TAG_DONE);
+	}
+}
 
 
 void main_event_handler()
@@ -703,31 +787,7 @@ void main_event_handler()
 
 									args = request_arguments();
 
-									if (!load_inferior (strinfo, path, args))
-									{
-										output_statement ("New process loaded");
-
-										init_breakpoints();
-
-										stabs_interpret_typedefs();
-										stabs_interpret_functions();
-										get_symbols();
-										stabs_interpret_globals();
-										close_elfhandle(exec_elfhandle);
-
-										button_setdisabled (SelectButtonObj, TRUE);
-										button_setdisabled (StartButtonObj, FALSE);
-										button_setdisabled (KillButtonObj, FALSE);
-										button_setdisabled (CrashButtonObj, TRUE);
-										button_setdisabled (SetBreakButtonObj, FALSE);
-										button_setdisabled (FilenameStringObj, FALSE);
-										button_setdisabled (HexviewButtonObj, FALSE);
-										button_setdisabled (RegisterviewButtonObj, FALSE);
-
-										IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
-														STRINGA_TextVal, strinfo,
-														TAG_DONE);
-									}
+									main_load (strinfo, path, args);
 
                                     break;
 
@@ -768,34 +828,12 @@ void main_event_handler()
 
 								case GAD_START_BUTTON:
 
-									if (is_breakpoint_at(context_copy.ip))
-									{
-										should_continue = TRUE;
-										asmstep();
-										break;
-									}
-									install_all_breakpoints();
-
-									button_setdisabled (StartButtonObj, TRUE);
-									button_setdisabled (PauseButtonObj, FALSE);
-									button_setdisabled (StepButtonObj, TRUE);
-									button_setdisabled (KillButtonObj, FALSE);
-									button_setdisabled (CrashButtonObj, TRUE);
-									button_setdisabled (SelectButtonObj, TRUE);
-
-									play();
-
+									main_play();
 									break;
 
 								case GAD_PAUSE_BUTTON:
-									button_setdisabled (StartButtonObj, FALSE);
-									button_setdisabled (PauseButtonObj, TRUE);
-									button_setdisabled (StepButtonObj, FALSE);
 
-									pause();
-
-									registers_update_window();
-
+									main_pause();
 									break;
 
 								case GAD_STEP_BUTTON:
@@ -813,19 +851,8 @@ void main_event_handler()
 									break;
 
 								case GAD_KILL_BUTTON:
-									button_setdisabled (StartButtonObj, TRUE);
-									button_setdisabled (PauseButtonObj, TRUE);
-									button_setdisabled (StepButtonObj, TRUE);
-									button_setdisabled (KillButtonObj, TRUE);
-									button_setdisabled (CrashButtonObj, TRUE);
-									button_setdisabled (SelectButtonObj, FALSE);
-									button_setdisabled (FilenameStringObj, TRUE);
-									//IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
 
-									killtask();
-
-									output_statement ("Program has been killed");
-									
+									main_kill();
 									break;
 
 								case GAD_CRASH_BUTTON:

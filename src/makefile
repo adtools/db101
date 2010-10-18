@@ -69,11 +69,14 @@ freemem.o: freemem.c freemem.h
 arexxport.o: arexxport.c arexxport.h suspend.h
 	$(CC) -c -gstabs -o arexxport.o arexxport.c
 
+arexxconsole.o: arexxconsole.c arexxconsole.h
+	$(CC) -c -gstabs -o arexxconsole.o arexxconsole.c
+
 
 ../db101: suspend.o symbols.o gui.o hexview.o \
 			stabs.o variables.o registers.o \
 			disassembler.o main.o breakpoints.o stacktrace.o globals.o attach.o breakpointswindow.o \
-			freemem.o arexxport.o
+			freemem.o arexxport.o arexxconsole.o
 	$(CC) -gstabs main.o suspend.o symbols.o gui.o hexview.o stabs.o variables.o globals.o \
 			registers.o disassembler.o breakpoints.o stacktrace.o attach.o \
-			breakpointswindow.o freemem.o arexxport.o -lauto -o ../db101
+			breakpointswindow.o freemem.o arexxport.o arexxconsole.o -lauto -o ../db101

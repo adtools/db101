@@ -39,6 +39,7 @@
 #include "breakpointswindow.h"
 #include "freemem.h"
 #include "arexxport.h"
+#include "arexxconsole.h"
 
 enum
 {
@@ -57,6 +58,7 @@ enum
 	GAD_DISASSEMBLE_BUTTON,
 	GAD_STACKTRACE_BUTTON,
 	GAD_GLOBALS_BUTTON,
+	GAD_AREXX_BUTTON,
 	GAD_LISTBROWSER,
 	GAD_TEXT
 };
@@ -71,7 +73,7 @@ BOOL main_window_is_open = FALSE;
 Object *SelectButtonObj, *FilenameStringObj, *AttachButtonObj, *ListBrowserObj;
 Object *StartButtonObj, *PauseButtonObj, *StepButtonObj, *KillButtonObj, *CrashButtonObj, *SetBreakButtonObj, *XButtonObj;
 Object *HexviewButtonObj, *VariablesButtonObj, *RegisterviewButtonObj, *DisassembleviewButtonObj, *StacktraceButtonObj;
-Object *GlobalsButtonObj;
+Object *GlobalsButtonObj, *ArexxButtonObj;
 
 char lastdir[1024] = "";
 char filename[1024] = "";
@@ -282,6 +284,7 @@ uint32 obtain_all_signals()
 	signal |= globals_obtain_window_signal();
 	signal |= breakpoints_obtain_window_signal();
 	signal |= arexx_obtain_signal();
+	signal |= arexxconsole_obtain_window_signal();
 	signal |= debug_sigfield;
 
 	return signal;
@@ -469,6 +472,14 @@ void main_open_window()
 						GA_Disabled, FALSE,
 					ButtonEnd,
 	                CHILD_WeightedHeight, 0,
+
+					LAYOUT_AddChild, ArexxButtonObj = ButtonObject,
+						GA_ID, GAD_AREXX_BUTTON,
+	                    GA_RelVerify, TRUE,
+						GA_Text, "Console",
+						GA_Disabled, FALSE,
+					ButtonEnd,
+	                CHILD_WeightedHeight, 0,
 				EndMember,
 				CHILD_WeightedHeight, 0,
 
@@ -638,6 +649,10 @@ void event_loop()
 				{
 					arexx_event_handler();
 				}
+				if (wait & arexxconsole_obtain_window_signal())
+				{
+					arexxconsole_event_handler();
+				}
 				if (shouldplay)
 				{
 					play();
@@ -669,6 +684,7 @@ void cleanup()
 	disassembler_close_window();
 	breakpoints_close_window();
 	main_close_window();
+	arexxconsole_close_window();
 	arexx_close_port();
 }
 
@@ -903,6 +919,11 @@ void main_event_handler()
 								case GAD_GLOBALS_BUTTON:
 
 									globals_open_window();
+									break;
+
+								case GAD_AREXX_BUTTON:
+
+									arexxconsole_open_window();
 									break;
                             }
                             break;

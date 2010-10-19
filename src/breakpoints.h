@@ -12,6 +12,9 @@ void guess_line_in_function(void);
 uint32 translate_sline_to_nline(uint32);
 int get_nline_from_address(uint32);
 
+BOOL breakpoint_line_in_file(uint32, char *);
+BOOL breakpoint_function (char *);
+
 void asmstep_install(void);
 void asmstep_remove(void);
 

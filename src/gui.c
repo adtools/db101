@@ -690,6 +690,8 @@ void cleanup()
 
 void main_play()
 {
+	if (!task_exists)
+		return;
 	if (is_breakpoint_at(context_copy.ip))
 	{
 		should_continue = TRUE;
@@ -720,6 +722,20 @@ void main_pause()
 
 	registers_update_window();
 }
+
+void main_step()
+{
+	button_setdisabled (StepButtonObj, TRUE);
+
+	if (hasfunctioncontext)
+	{
+		step();
+									
+		//if (current_function->currentline == current_function->numberoflines - 1)
+		//button_setdisabled (StepButtonObj, TRUE);
+	}
+}
+
 
 void main_kill()
 {
@@ -763,6 +779,38 @@ void main_load(char *name, char *path, char *args)
 		IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
 														STRINGA_TextVal, name,
 														TAG_DONE);
+	}
+}
+
+void main_attach(struct Process *pr)
+{
+	if (!pr)
+		return;
+	if (amigaos_attach(pr))
+	{
+		output_statement ("Attached to process");
+		isattached = TRUE;
+
+		init_breakpoints();
+
+		stabs_interpret_typedefs();
+		stabs_interpret_functions();
+		get_symbols();
+		stabs_interpret_globals();
+		close_elfhandle(exec_elfhandle);
+
+		button_setdisabled (SelectButtonObj, TRUE);
+		button_setdisabled (StartButtonObj, FALSE);
+		button_setdisabled (KillButtonObj, FALSE);
+		button_setdisabled (CrashButtonObj, TRUE);
+		button_setdisabled (SetBreakButtonObj, FALSE);
+		button_setdisabled (FilenameStringObj, FALSE);
+		button_setdisabled (HexviewButtonObj, FALSE);
+		button_setdisabled (RegisterviewButtonObj, FALSE);
+
+										//IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
+										//				STRINGA_TextVal, strinfo,
+										//				TAG_DONE);
 	}
 }
 
@@ -810,35 +858,7 @@ void main_event_handler()
 								case GAD_ATTACH_BUTTON:
 
 									pr = attach_select_process();
-
-									if (!pr) break;
-									if (amigaos_attach(pr))
-									{
-										output_statement ("Attached to process");
-										isattached = TRUE;
-
-										init_breakpoints();
-
-										stabs_interpret_typedefs();
-										stabs_interpret_functions();
-										get_symbols();
-										stabs_interpret_globals();
-										close_elfhandle(exec_elfhandle);
-
-										button_setdisabled (SelectButtonObj, TRUE);
-										button_setdisabled (StartButtonObj, FALSE);
-										button_setdisabled (KillButtonObj, FALSE);
-										button_setdisabled (CrashButtonObj, TRUE);
-										button_setdisabled (SetBreakButtonObj, FALSE);
-										button_setdisabled (FilenameStringObj, FALSE);
-										button_setdisabled (HexviewButtonObj, FALSE);
-										button_setdisabled (RegisterviewButtonObj, FALSE);
-
-										//IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
-										//				STRINGA_TextVal, strinfo,
-										//				TAG_DONE);
-									}
-
+									main_attach (pr);
 
 									break;
 
@@ -854,16 +874,7 @@ void main_event_handler()
 
 								case GAD_STEP_BUTTON:
 
-									button_setdisabled (StepButtonObj, TRUE);
-
-									if (hasfunctioncontext)
-									{
-										step();
-									
-										//if (current_function->currentline == current_function->numberoflines - 1)
-											//button_setdisabled (StepButtonObj, TRUE);
-									}
-
+									main_step();
 									break;
 
 								case GAD_KILL_BUTTON:

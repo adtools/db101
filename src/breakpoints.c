@@ -186,6 +186,43 @@ void guess_line_in_function ()
 	f->currentline = f->numberoflines-1;
 }
 
+BOOL breakpoint_line_in_file (uint32 line, char *file)
+{
+	struct stab_function *f = (struct stab_function *)IExec->GetHead(&function_list);
+	while (f)
+	{
+		if (!strcmp (f->sourcename, file))
+		{
+			int i;
+			for (i = 0; i < f->numberoflines; i++)
+			{
+				if (f->lineinfile[i] == line)
+				{
+					insert_breakpoint (f->address+f->lines[i], LINE_NORMAL);
+					return TRUE;
+				}
+			}
+		}
+		f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
+	}
+	return FALSE;
+}
+
+BOOL breakpoint_function (char *fname)
+{
+	struct stab_function *f = (struct stab_function *)IExec->GetHead(&function_list);
+	while (f)
+	{
+		if (!strcmp (f->name, fname))
+		{
+			insert_breakpoint (f->address, LINE_NORMAL);
+			return TRUE;
+		}
+		f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
+	}
+	return FALSE;
+}
+
 
 void insert_breakpoint(uint32 addr, uint32 type)
 {

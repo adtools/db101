@@ -66,7 +66,7 @@ breakpointswindow.o: breakpointswindow.c breakpointswindow.h stabs.h suspend.h
 freemem.o: freemem.c freemem.h
 	$(CC) -c -gstabs -o freemem.o freemem.c
 
-arexxport.o: arexxport.c arexxport.h suspend.h
+arexxport.o: arexxport.c arexxport.h suspend.h breakpoints.h gui.h
 	$(CC) -c -gstabs -o arexxport.o arexxport.c
 
 arexxconsole.o: arexxconsole.c arexxconsole.h

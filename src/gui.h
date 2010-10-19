@@ -6,8 +6,10 @@ void main_event_handler(void);
 
 void main_play(void);
 void main_pause(void);
+void main_step(void);
 void main_kill(void);
 void main_load(char *, char *, char *);
+void main_attach(struct Process *);
 
 void event_loop(void);
 void cleanup(void);

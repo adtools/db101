@@ -85,6 +85,8 @@ void arexxconsole_open_window()
 					GA_RelVerify, TRUE,
                     GA_Text, "Send",
                 ButtonEnd,
+				CHILD_WeightedWidth, 0,
+
 			EndMember,
         EndWindow))
 
@@ -141,6 +143,9 @@ void arexxconsole_event_handler()
 									execute.ape_CommandString = acommandstring;
 									execute.ape_PortName = "AREXXDB101";
 									execute.ape_IO = NULL;
+
+                                    IIntuition->SetAttrs( ArexxStringObj, STRINGA_TextVal, "", TAG_DONE );
+									IIntuition->RefreshGadgets ((struct Gadget *)ArexxStringObj, arexxwin, NULL);
 
 									IIntuition->IDoMethodA(arexx_obj, &execute);
 

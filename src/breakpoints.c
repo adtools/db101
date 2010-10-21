@@ -241,25 +241,41 @@ void insert_breakpoint(uint32 addr, uint32 type)
 
 void remove_breakpoint (uint32 addr)
 {
-	if (!is_breakpoint_at)
+	if (!is_breakpoint_at(addr))
 		return;
 
 	struct Node *node = IExec->GetHead(&breakpoint_list);
 	struct breakpoint *b;
 
-	if (node)
+	while (node)
 	{
-		while(1)
+		b = (struct breakpoint *)node;
+
+		if (addr == b->address)
 		{
-			b = (struct breakpoint *)node;
-
-			if (addr == b->address)
-				IExec->Remove (node);
-
-			if (node == IExec->GetTail(&breakpoint_list))
-				break;
-			node = IExec->GetSucc (node);
+			IExec->Remove (node);
+			IExec->FreeMem (b, sizeof (struct breakpoint));	
+			break;
 		}
+
+		node = IExec->GetSucc (node);
+	}
+}
+
+void free_breakpoints ()
+{
+	struct Node *node = IExec->GetHead(&breakpoint_list);
+	struct Node *next;
+	struct breakpoint *b;
+
+	while (node)
+	{
+		next = IExec->GetSucc (node);
+		b = (struct breakpoint *)node;
+		IExec->Remove (node);
+		IExec->FreeMem (b, sizeof (struct breakpoint));		
+
+		node = next;
 	}
 }
 

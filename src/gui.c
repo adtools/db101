@@ -80,6 +80,7 @@ char filename[1024] = "";
 char childpath[1024] = "";
 
 struct stab_function *current_function = NULL;
+struct stab_function *old_function = NULL;
 BOOL hasfunctioncontext = FALSE;
 BOOL isattached = FALSE;
 
@@ -237,14 +238,32 @@ void output_lineinfile (uint32 line)
 
 	sprintf(numberstr, "%d", line);
 
-	if (current_function->currentline == 0)
-		output_statement (current_function->sourcename);
+//	if (current_function->currentline == 0)
+//		output_statement (current_function->sourcename);
 
 	if (node = IListBrowser->AllocListBrowserNode(2,
 												LBNA_Column, 0,
 												LBNCA_Text, numberstr,
             									LBNA_Column, 1,
                 								LBNCA_Text, strline,
+            									TAG_DONE))
+        							{
+							            IExec->AddTail(&listbrowser_list, node);
+									}
+	IIntuition->RefreshGadgets ((struct Gadget *)ListBrowserObj, mainwin, NULL);
+}
+
+void output_functionheader ()
+{
+	struct Node *node;
+	char *fstring = IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
+	add_freelist (&main_freelist, 1024, fstring);
+
+	sprintf(fstring, "entering: %s()  <%s>", current_function->name, current_function->sourcename);
+
+	if (node = IListBrowser->AllocListBrowserNode(2,
+            									LBNA_Column, 1,
+                								LBNCA_Text, fstring,
             									TAG_DONE))
         							{
 							            IExec->AddTail(&listbrowser_list, node);
@@ -556,6 +575,10 @@ void event_loop()
 
 						if (hasfunctioncontext)
 						{
+							if (current_function != old_function)
+								output_functionheader();
+							old_function = current_function;
+
 							int nline = get_nline_from_address (context_copy.ip);
 
 							if (nline != -1)
@@ -604,6 +627,7 @@ void event_loop()
 					stabs_free_functions();
 					stabs_free_typedefs();
 					stabs_free_globals();
+					free_breakpoints();
 
 					globals_close_window();
 					registers_close_window();

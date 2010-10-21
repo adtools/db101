@@ -84,11 +84,6 @@ char *print_variable_value(struct stab_symbol *s)
 	uint32 buffer = 0x0;
 	uint32 addr = 0x0;
 
-	if (s->type == NULL)
-	{
-		strcpy (ret, "UNKNOWN");
-		return ret;
-	}
 
 	switch (s->location)
 	{
@@ -113,7 +108,13 @@ char *print_variable_value(struct stab_symbol *s)
 		break;
 	}
 
-
+	if (s->type == NULL)
+	{
+		//if we can't get the type, just print hex:
+		uint32 unknownu32 = *(uint32*)addr;
+		sprintf(ret, "%u (UNKNOWN)", unknownu32);
+	}
+	else
 		switch (s->type->type)
 		{
 		case T_POINTER:

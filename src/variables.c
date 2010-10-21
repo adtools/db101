@@ -112,7 +112,7 @@ char *print_variable_value(struct stab_symbol *s)
 	{
 		//if we can't get the type, just print hex:
 		uint32 unknownu32 = *(uint32*)addr;
-		sprintf(ret, "%u (UNKNOWN)", unknownu32);
+		sprintf(ret, "0x%x (UNKNOWN)", unknownu32);
 	}
 	else
 		switch (s->type->type)
@@ -179,7 +179,7 @@ char *print_variable_value(struct stab_symbol *s)
 			{
 			//if we can't get the type, just print hex:
 			uint32 unknownu32 = *(uint32*)addr;
-			sprintf(ret, "%u (UNKNOWN)", unknownu32);
+			sprintf(ret, "0x%x (UNKNOWN)", unknownu32);
 			}
 			break;
 		}

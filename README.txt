@@ -56,4 +56,6 @@ If you have any problems or comments, please write to: alfkil@gmail.com
 
 history:
 
+v. 0.9: added Arexx port and console
+v. 0.8: added attach mode
 v. 0.7: added globals and correct reading of variable types

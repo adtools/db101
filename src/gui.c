@@ -325,7 +325,7 @@ void main_open_window()
     /* Create the window object. */
     if(( MainWinObj = WindowObject,
             WA_ScreenTitle, "DEbug 101",
-            WA_Title, "DEbug 101 v0.8",
+            WA_Title, "DEbug 101 v0.9",
             WA_Width, 500,
 			WA_Height, 500,
             WA_DepthGadget, TRUE,

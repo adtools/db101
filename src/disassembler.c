@@ -90,7 +90,8 @@ void disassembler_makelist()
 	IExec->NewList (&assemblelist);
 	int i;
 	APTR address = (APTR) current_function->address;
-
+	
+	IIntuition->SetAttrs(DisassemblerListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
 	for (i = 0; i < 1024; i++)
 	{
 		char *str = IExec->AllocMem (50, MEMF_ANY|MEMF_CLEAR);
@@ -117,7 +118,7 @@ void disassembler_makelist()
 	}
 	if (disassembler_window_is_open)
 	{
-		IIntuition->RefreshGadgets ((struct Gadget *)DisassemblerListBrowserObj, disassemblerwin, NULL);
+		IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &assemblelist, TAG_END);
 		disassembler_show_selected();
 	}
 }

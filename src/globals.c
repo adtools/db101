@@ -65,7 +65,7 @@ void globals_update_window()
 
 	//if (has_globals_list)
 	
-	IIntuition->SetAttrs( GlobalsListBrowserObj, LISTBROWSER_Labels, NULL, TAG_DONE );
+	IIntuition->SetAttrs( GlobalsListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE );
 	
 	if(( !IsListEmpty( &globalslist )))
 		globals_freelist();

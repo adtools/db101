@@ -2,12 +2,14 @@
 #include "gui.h"
 #include "breakpoints.h"
 #include "arexxport.h"
+#include "freemem.h"
 
 #include <string.h>
 
 int main(int argc, char *argv[])
 {
 	init();
+	freemem_init();
 	init_breakpoints();
 	arexx_open_port();
 	if (argc < 2 || strcmp("NOGUI", argv[1]) )

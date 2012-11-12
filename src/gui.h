@@ -1,3 +1,5 @@
+#include <proto/dos.h>
+
 #include "stabs.h"
 
 void main_open_window(void);

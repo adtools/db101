@@ -48,7 +48,7 @@ struct Window *breakpointswin = NULL;
 
 struct List breakpointslist;
 struct ColumnInfo *breakpointscolumninfo = NULL;
-
+int breakpointslist_isempty = TRUE;
 
 struct stab_function *breakpoints_get_selected_function(uint32 selected)
 {
@@ -60,6 +60,7 @@ struct stab_function *breakpoints_get_selected_function(uint32 selected)
     return f;
 }
 
+static char *nobreaks_str = "-- No breakpoints available --";
 
 void breakpoints_makelist()
 {
@@ -68,8 +69,22 @@ void breakpoints_makelist()
     
     if (!IsListEmpty(&breakpointslist))
         breakpoints_freelist();
-        
+
     IExec->NewList (&breakpointslist);
+	if(!f)
+	{
+		breakpointslist_isempty = TRUE;
+
+        if (node = IListBrowser->AllocListBrowserNode(2,
+                                                LBNA_Column, 0,
+                                                LBNCA_Text, nobreaks_str,
+                                                TAG_DONE))
+                                    {
+                                        IExec->AddTail(&breakpointslist, node);
+                                    }
+		return;
+	}
+
     while(f)
     {
         if (node = IListBrowser->AllocListBrowserNode(2,
@@ -78,6 +93,7 @@ void breakpoints_makelist()
                                                 TAG_DONE))
                                     {
                                         IExec->AddTail(&breakpointslist, node);
+                                       	breakpointslist_isempty = FALSE;
                                     }
         f = (struct stab_function *)IExec->GetSucc ((struct Node *)f);
     }
@@ -98,14 +114,14 @@ void breakpoints_open_window()
         return;
         
     breakpoints_makelist();
-    
+
     breakpointscolumninfo = IListBrowser->AllocLBColumnInfo(1,
         LBCIA_Column, 0,
             LBCIA_Title, "Functions",
             //LBCIA_Weight, 35,
-            LBCIA_Sortable, TRUE,
-            LBCIA_AutoSort, TRUE,
-            LBCIA_SortArrow, TRUE,
+            //LBCIA_Sortable, TRUE,
+            //LBCIA_AutoSort, TRUE,
+            //LBCIA_SortArrow, TRUE,
         TAG_DONE);
         
     /* Create the window object. */
@@ -202,20 +218,22 @@ void breakpoints_event_handler()
                         /* if the user has entered a new text for the buttons
                         ** help text, get it, and set it
                         */
-                        IIntuition->GetAttrs( BreakpointsListBrowserObj,
-                                        LISTBROWSER_Selected, &selected, TAG_DONE );
-                                        
-                        if (selected != 0x7fffffff)
+                        if(!breakpointslist_isempty)
                         {
-                            f = breakpoints_get_selected_function(selected);
+	                        IIntuition->GetAttrs( BreakpointsListBrowserObj,
+    	                                    LISTBROWSER_Selected, &selected, TAG_DONE );
+                                        
+        	                if (selected != 0x7fffffff)
+            	            {
+                	            f = breakpoints_get_selected_function(selected);
                             
-                            if (f)
-                            {
-                                pause();
-                                insert_breakpoint (f->address, BR_NORMAL);
-                            }
+                    	        if (f)
+                        	    {
+                            	    pause();
+                                	insert_breakpoint (f->address, BR_NORMAL);
+                            	}
+                        	}
                         }
-                        
                         done = TRUE;
                         break;
                 }

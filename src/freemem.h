@@ -2,12 +2,18 @@
 
 #include <exec/nodes.h>
 
-void add_freelist(struct List *, uint32, void *);
+void freemem_init();
+int freemem_alloc_hook();
+void freemem_free_hook();
+void *freemem_malloc(int, int);
+char *freemem_strdup(int, char *);
+void freemem_clear();
+
+void add_freelist(struct List *, void *);
 void freelist (struct List *);
 
 struct freenode
 {
 	struct Node node;
-	uint32 size;
 	void *address;
 };

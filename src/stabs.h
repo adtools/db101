@@ -50,11 +50,15 @@ enum __stab_location
 	L_ABSOLUTE
 };
 
-enum __stab_symbol_types
+typedef enum __stab_symbol_types
 {
 	T_UNKNOWN = 0,
 	T_POINTER,
+	T_ARRAY,
 	T_STRUCT,
+	T_UNION,
+	T_ENUM,
+	T_CONFORMANT_ARRAY,
 	T_VOID,
 	T_BOOL,
 	T_U8,
@@ -66,7 +70,34 @@ enum __stab_symbol_types
 	T_U64,
 	T_64,
 	T_FLOAT32,
-	T_FLOAT64
+	T_FLOAT64,
+	T_FLOAT128
+} __stab_symbol_type;
+
+struct stab_struct_element
+{
+	struct Node node;
+	char *name;
+	int bitoffset, bitsize;
+	struct stab_typedef *type;
+};
+
+struct stab_structure
+{
+	int size;
+	struct List list;
+};
+
+struct stab_enum_element
+{
+	struct Node node;
+	char *name;
+	int value; //should this be a double int?
+};
+
+struct stab_enum
+{
+	struct List list;
 };
 
 struct stab_typedef
@@ -74,9 +105,12 @@ struct stab_typedef
 	struct Node node;
 	char *name;
 	uint32 type;
-	uint32 array;
-	uint32 number;
+	uint32 filenum;
+	uint32 typenum;
+	uint32 arraysize;
 	struct stab_typedef *points_to;
+	struct stab_structure *struct_ptr; //for struct and union
+	struct stab_enum *enum_ptr; //for enums
 };
 
 struct stab_sourcefile
@@ -85,6 +119,7 @@ struct stab_sourcefile
 	char *filename;
 	struct List function_list;
 	struct List typedef_list;
+	struct List unknown_list; //for unknown pointer types
 };
 
 
@@ -97,6 +132,8 @@ void stabs_interpret_globals(void);
 void stabs_free_functions(void);
 void stabs_free_typedefs(void);
 void stabs_free_globals(void);
+void stabs_interpret_stabs(void);
+void stabs_free_stabs(void);
 
 extern char *stabs_strdup_strip(char *);
 char *skip_in_string (char *, char *);

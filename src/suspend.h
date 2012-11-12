@@ -26,6 +26,7 @@ extern Elf32_Addr code_elf_addr;
 extern int code_size;
 extern void *code_relocated_addr;
 
+extern struct Hook debug_hook;
 extern struct ExceptionContext *context_ptr, context_copy;
 
 extern BOOL asm_trace;

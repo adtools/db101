@@ -29,6 +29,8 @@
 #include "gui.h"
 #include "suspend.h"
 #include "breakpoints.h"
+#include "console.h"
+#include "pipe.h"
 
 struct DebugIFace *IDebug = 0;
 struct MMUIFace *IMMU = 0;
@@ -58,6 +60,7 @@ Elf32_Addr code_elf_addr;
 int code_size;
 void *code_relocated_addr;
 
+extern BPTR outpipe[2];
 
 struct Elf32_SymbolQuery query;
 
@@ -84,7 +87,7 @@ void init()
     if (!IMMU)
 	{
 		IExec->DropInterface((struct Interface *)IDebug);
-		printf("Can't get MMU access\n");
+		console_printf(OUTPUT_WARNING, "Can't get MMU access\n");
 		exit(RETURN_FAIL);
 	}
 
@@ -110,10 +113,8 @@ void attach_hook()
     debug_hook.h_Entry = (ULONG (*)())amigaos_debug_callback;
     debug_hook.h_Data =  (APTR)&debug_data;
 
-printf("trying to attach debug hook...\n");
 	if(task_exists)
 		IDebug->AddDebugHook((struct Task *)process, &debug_hook);
-printf("debug hook attached!\n");
 }
 
 void remove_hook()
@@ -147,13 +148,13 @@ int amigaos_relocate_elfhandle ()
     		EAT_SectionStringTable, &strtblidx,
     		TAG_DONE)))
     {
-    	fprintf(stderr,"Cannot query elf handle\n");
+    	console_printf(OUTPUT_WARNING,"Cannot query elf handle\n");
     	return -1;
     }
 
     if (!(strtbl = (char*)IElf->GetSectionTags(hElf, GST_SectionIndex, strtblidx, TAG_DONE)))
     {
-    	fprintf(stderr,"Unable to get string table\n");
+    	console_printf(OUTPUT_WARNING,"Unable to get string table\n");
     	return -1;
     }
 
@@ -174,7 +175,7 @@ int amigaos_relocate_elfhandle ()
 					GST_SectionIndex, i,
 					TAG_DONE);
 
-			printf("Executable section (0x%x/%d bytes) starts at %p\n",(int)code_elf_addr,code_size,code_relocated_addr);
+			console_printf(OUTPUT_SYSTEM, "Executable section (0x%x/%d bytes) starts at %p\n",(int)code_elf_addr,code_size,code_relocated_addr);
 		}
 
 		/* If this is a rela section, relocate the related section */
@@ -192,14 +193,14 @@ int amigaos_relocate_elfhandle ()
 			 */
 			if (pRefHeader && !(pRefHeader->sh_flags & SWF_ALLOC))
 			{
-				printf("Relocating section \"%s\" (index %d) which is referred by section \"%s\" (index %d)\n",
+				console_printf(OUTPUT_SYSTEM, "Relocating section \"%s\" (index %d) which is referred by section \"%s\" (index %d)\n",
 						&strtbl[pRefHeader->sh_name], pHeader->sh_info,
 						&strtbl[pHeader->sh_name],i);
 				tags[0].ti_Data = pHeader->sh_info;
 
 				if (!IElf->RelocateSection(hElf, tags))
 				{
-					fprintf(stderr,"Section %s (index %d) could not been relocated.\n",&strtbl[pRefHeader->sh_name],(int)pHeader->sh_info);
+					console_printf(OUTPUT_WARNING,"Section %s (index %d) could not been relocated.\n",&strtbl[pRefHeader->sh_name],(int)pHeader->sh_info);
 				}
 
 			}
@@ -222,7 +223,7 @@ amigaos_attach (struct Process *aprocess)
   
     if (!exec_seglist)
     {
-		printf ("Can't find seglist!\n");
+		console_printf(OUTPUT_WARNING, "Can't find seglist!\n");
 		return FALSE;
     }
 
@@ -235,14 +236,11 @@ amigaos_attach (struct Process *aprocess)
     if (!exec_elfhandle)
     {
 		exec_seglist = 0;
-		printf ("Process is no ELF binary!\n");
+		console_printf(OUTPUT_WARNING, "Process is no ELF binary!\n");
 		return FALSE;
     }
 
-
-
 	process  = aprocess;
-
 
     /* Suspend the task */
     //dprintf("Process state: %d\n",pProcess->pr_Task.tc_State);
@@ -251,7 +249,6 @@ amigaos_attach (struct Process *aprocess)
 		printf("Suspending task %p\n", process);
 		IExec->SuspendTask((struct Task *)process, 0);
     }
-	printf("task suspended!\n");
 
 	task_exists = TRUE;
 	task_playing = FALSE;
@@ -287,10 +284,11 @@ int load_inferior(char *filename, char *path, char *args)
 
 	char fullpath[1024];
 
+console_printf(OUTPUT_SYSTEM, "Trying lock on %s", path);
 	BPTR lock = IDOS->Lock (path, SHARED_LOCK);
 	if (!lock)
 	{
-		printf("Coudln't get currentdir lock\n");
+		console_printf(OUTPUT_WARNING, "Coudln't get currentdir lock\n");
 		return -1;
 	}
 	BPTR homelock = IDOS->DupLock (lock);
@@ -308,7 +306,7 @@ int load_inferior(char *filename, char *path, char *args)
 	
     if (exec_seglist == 0L)
 	{
-		printf ("\"%s\": not an executable file\n", filename);
+		console_printf (OUTPUT_WARNING, "\"%s\": not an executable file\n", filename);
 		IDOS->UnLock(lock);
 		return -1;
 	}
@@ -331,7 +329,7 @@ int load_inferior(char *filename, char *path, char *args)
 				NP_Arguments,       args,
 				NP_Input,	    	IDOS->Input(),
 				NP_CloseInput,      FALSE,
-				NP_Output,          IDOS->Output(),
+				NP_Output,          pipe_get_write_end(), //IDOS->Output(),
 				NP_CloseOutput,     FALSE,
 				NP_Error,           IDOS->ErrorOutput(),
 				NP_CloseError,      FALSE,
@@ -343,7 +341,7 @@ int load_inferior(char *filename, char *path, char *args)
 	{
 		IExec->Permit();
 		task_exists = FALSE;
-		printf("Couldn't start new task\n");
+		console_printf(OUTPUT_WARNING, "Couldn't start new task\n");
 		ret = -1;
 	}
 	else
@@ -378,10 +376,11 @@ void play()
 		{
 			task_playing = TRUE;
 			entering_function = TRUE;
+
 			IExec->RestartTask((struct Task *)process, 0L);
 			if (process->pr_Task.tc_State == TS_SUSPENDED)
 			{
-				printf("Failed to restart task!\n");
+				console_printf(OUTPUT_WARNING, "Failed to restart task!\n");
 				//IExec->RemTask (newtask);
 			}
 		}
@@ -428,11 +427,16 @@ void asmstep()
 		if (task_playing)
 			pause();
 
+		context_ptr->ip = context_copy.ip;
+//printf("asmstep() context_ptr->ip = 0x%08x\n", context_ptr->ip);
+IDOS->Delay(2);
 		//should work, but doesn't:
 		//context_ptr->msr |= MSR_TRACE_ENABLE;
 		//this is just a bad hack:
 		asmstep_install();
 
+//printf("asmstep() 2: context_ptr->ip = 0x%08x\n", context_ptr->ip);
+IDOS->Delay(2);
 		play();
 	}
 }
@@ -501,7 +505,7 @@ amigaos_debug_callback(struct Hook *hook, struct Task *currentTask,
 			break;
 
 		case DBHMT_EXCEPTION:
-			*data = 11;
+			*data = dbgmsg->message.context->ip;
 			traptype = dbgmsg->message.context->Traptype;
 			if (traptype == 0x700 || traptype == 0xd00)
 			{
@@ -613,6 +617,3 @@ int memory_remove_breakpoint(uint32 addr, uint32 *buffer)
 
   return 0;
 }
-
-
-

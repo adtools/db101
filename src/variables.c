@@ -39,19 +39,25 @@
 #include "variables.h"
 #include "freemem.h"
 
-enum
-{
-    SYMBOL_BUTTON = 1,
-    SYMBOL_LISTBROWSER
-};
 
-Object *LocalsWinObj, *LocalsButtonObj, *LocalsListBrowserObj;
-struct Window *localswin = NULL;
+Object *VariablesListBrowserObj;
+extern struct Window *mainwin;
 
-struct List variablelist;
-struct List loc_freelist;
+struct List variable_list;
+int locals_freemem_hook = -1;
 
-struct ColumnInfo *localscolumninfo = NULL;
+struct ColumnInfo *variablescolumninfo;
+
+char *vardummytext = "dummy";
+
+struct Node *locals_node = NULL;
+struct Node *globals_node = NULL;
+struct Node *registers_node = NULL;
+int globals_list_populated = 0;
+int locals_list_populated = 0;
+
+extern struct stab_function *current_function;
+struct stab_function *variables_shown_function = NULL;
 
 /********************************************************************/
 
@@ -76,14 +82,67 @@ BOOL is_readable_address (uint32 addr)
     return ret;
 }
 
+uint32 get_pointer_value(struct stab_symbol *s)
+{
+    if(s->type == NULL)
+    {
+    	return -1;
+    }
+	switch (s->location)
+    {
+    case L_STACK:
+        {
+        uint32 stackp = (uint32)process->pr_Task.tc_SPReg;
+        uint32 tmpaddr = stackp + s->offset;
+
+        uint32 buffer = *(uint32*)tmpaddr;
+        //uint32 addr = (uint32)&buffer;
+        //return *(uint32 *)addr;
+        return buffer;
+        }
+
+    case L_ABSOLUTE:
+        {
+        uint32 addr = s->address;
+		return *(uint32 *)addr;
+        }
+//    case L_REGISTER:
+
+    default:
+        printf( "Not a known variable type" );
+        break;
+    }
+    return -1;
+}
+
+uint32 get_struct_address(struct stab_symbol *s)
+{
+	switch (s->location)
+    {
+    case L_STACK:
+        {
+        uint32 stackp = (uint32)process->pr_Task.tc_SPReg;
+        uint32 addr = stackp + s->offset;
+
+        return addr;
+        }
+
+    case L_ABSOLUTE:
+        {
+        uint32 addr = s->address;
+		return addr;
+        }
+    }
+    return -1;
+}
+
 
 char *print_variable_value(struct stab_symbol *s)
 {
-    char *ret = IExec->AllocMem (256, MEMF_ANY|MEMF_CLEAR);
+    char *ret = freemem_malloc(locals_freemem_hook, 256);
 
     uint32 buffer = 0x0;
     uint32 addr = 0x0;
-
 
     switch (s->location)
     {
@@ -107,22 +166,51 @@ char *print_variable_value(struct stab_symbol *s)
         printf( "Not a known variable type" );
         break;
     }
-
+    
     if (s->type == NULL)
     {
-        //if we can't get the type, just print hex:
-        uint32 unknownu32 = *(uint32*)addr;
-        sprintf(ret, "0x%x (UNKNOWN)", unknownu32);
+        sprintf(ret, "(no type)");
     }
     else
         switch (s->type->type)
         {
         case T_POINTER:
             {
-            sprintf( ret, "0x%x", *(uint32*)addr);
+            sprintf( ret, "(*) 0x%x", *(uint32*)addr);
             }
             break;
-        case T_32:
+            
+		case T_VOID:
+			{
+			sprintf( ret, "(void)");
+			}
+			break;
+			
+		case T_ENUM:
+			{
+			struct stab_enum *enu = s->type->enum_ptr;
+			if(s->type->points_to)
+				enu = s->type->points_to->enum_ptr;
+
+            int32 value32 = *(int32*)addr;
+			struct stab_enum_element *e = (struct stab_enum_element *)IExec->GetHead(&(enu->list));
+			if(e)
+			while(1)
+			{
+				if(value32 == e->value)
+				{
+					sprintf(ret, "%s (%d)\n", e->name, value32);
+					return ret;
+				}
+				if(e == (struct stab_enum_element *)IExec->GetTail(&(enu->list)))
+					break;
+				e = (struct stab_enum_element *)IExec->GetSucc((struct Node *)e);
+			}
+			sprintf(ret, "<unknown> (%d)", value32);
+			}
+			break;
+					
+		case T_32:
             {
             int32 value32 = *(int32*)addr;
             sprintf(ret, "%d", value32);
@@ -175,6 +263,13 @@ char *print_variable_value(struct stab_symbol *s)
             }
             break;
 
+        case T_FLOAT64:
+            {
+            double valuef64 = *(double*)addr;
+            sprintf(ret, "%f", valuef64);
+            }
+            break;
+
         default:
             {
             //if we can't get the type, just print hex:
@@ -186,211 +281,492 @@ char *print_variable_value(struct stab_symbol *s)
 
     return ret;
 }
-    
-void locals_update_window()
+
+
+struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32 gen, int hidden)
 {
-    if (!localswin)
-        return;
+	uint32 hidflag = (hidden ? LBFLG_HIDDEN : 0);
+	struct Node *node;
+		
+	switch(s->type->type)
+	{
+      	case T_UNKNOWN:
+    	case T_VOID:
+    	case T_BOOL:
+	    case T_U8:
+	    case T_8:
+	    case T_U16:
+	    case T_16:
+	    case T_U32:
+	    case T_32:
+	    case T_U64:
+	    case T_64:
+	    case T_FLOAT32:
+	    case T_FLOAT64:
+	    case T_ENUM:
+	   	{
+			TEXT buf[1024];
+	        IUtility->SNPrintf(buf, sizeof(buf), "%s", s->name);
 
-    struct Node *node;
+			char *str = print_variable_value(s);
+			
+            struct variables_userdata *u = freemem_malloc(locals_freemem_hook, sizeof(struct variables_userdata));
+            u->s = s;
+            u->haschildren = 0;
+            
+			if (node = IListBrowser->AllocListBrowserNode(2,
+		        								LBNA_Generation, gen+1,
+		        								LBNA_Flags, hidflag,
+                                                LBNA_Column, 0,
+                                                LBNA_UserData, u,
+                                                	LBNCA_CopyText, TRUE,
+                                                	LBNCA_Text, buf,
+                                                LBNA_Column, 1,
+                                               		LBNCA_Text, str,
+                                                TAG_DONE))
+                                    {
+                                    	if(n)
+	                                        IExec->Insert(&variable_list, node, n);
+	                                    else
+	                                    	IExec->AddTail(&variable_list, node);
+                                    }
+		}
+		break;
+				
+		case T_POINTER:
+		{
+			TEXT buf[1024];
+	        IUtility->SNPrintf(buf, sizeof(buf), "%s", s->name);
+	        
+		    struct variables_userdata *u = freemem_malloc(locals_freemem_hook, sizeof(struct variables_userdata));
+		    struct stab_symbol *news = freemem_malloc(locals_freemem_hook, sizeof(struct stab_symbol));
+		    news->name = " - ";
+		    news->type = s->type->points_to;
+            news->location = L_ABSOLUTE;
+            news->address = get_pointer_value(s);
+			char *str = print_variable_value(s);
+            u->s = news;
+            u->haschildren = 1;
+            u->isopen = 0;
 
-    //if (has_variable_list)
-    if(( !IsListEmpty( &variablelist )))
-        locals_freelist();
+	        if (node = IListBrowser->AllocListBrowserNode(2,
+		        								LBNA_Generation, gen+1,
+		        								LBNA_Flags, LBFLG_HASCHILDREN|hidflag,
+		        								LBNA_UserData, u,
+                                                LBNA_Column, 0,
+                                                	LBNCA_CopyText, TRUE,
+                                                	LBNCA_Text, buf,
+                                                LBNA_Column, 1,
+                                                	LBNCA_Text, str,
+                                                TAG_DONE))
+                                    {
+                                    	if(n)
+                                    		IExec->Insert(&variable_list, node, n);
+                                    	else
+	                                        IExec->AddTail(&variable_list, node);
+                                    }
 
-    IExec->NewList (&variablelist);
+		}
+		break;
+		
+		case T_STRUCT:
+		case T_UNION:
+		{
+			TEXT buf[1024];
+	        IUtility->SNPrintf(buf, sizeof(buf), "%s", s->name);
+
+			char *str = " < struct > ";
+			
+            struct variables_userdata *u = freemem_malloc(locals_freemem_hook, sizeof(struct variables_userdata));
+            u->s = s;
+            u->haschildren = 1;
+            u->isopen = 1;
+            
+			if (node = IListBrowser->AllocListBrowserNode(2,
+		        								LBNA_Generation, gen+1,
+		        								LBNA_Flags, LBFLG_HASCHILDREN|hidflag,
+                                                LBNA_Column, 0,
+                                                LBNA_UserData, u,
+                                                	LBNCA_CopyText, TRUE,
+                                                	LBNCA_Text, buf,
+                                                LBNA_Column, 1,
+                                               		LBNCA_Text, str,
+                                                TAG_DONE))
+            {
+               	if(n)
+	        	    IExec->Insert(&variable_list, node, n);
+	            else
+	              	IExec->AddTail(&variable_list, node);
+            }
+
+			uint32 address = get_struct_address(s);
+			
+			struct stab_structure *stru = s->type->struct_ptr;
+			if(s->type->points_to)
+				stru = s->type->points_to->struct_ptr;
+
+			struct stab_struct_element *e = (struct stab_struct_element *)IExec->GetHead(&(stru->list));
+			if(e)
+			while(1)
+			{
+	    	    struct variables_userdata *u = freemem_malloc(locals_freemem_hook, sizeof(struct variables_userdata));
+		    	struct stab_symbol *news = freemem_malloc(locals_freemem_hook, sizeof(struct stab_symbol));
+		    	news->name = e->name;
+		    	news->type = e->type;
+		        news->location = L_ABSOLUTE;
+        	    news->address = address + (e->bitoffset >> 3);
+
+		    	node = variables_add_children(node, news, gen+1, TRUE);
+				
+				if(e == (struct stab_struct_element *)IExec->GetTail(&(stru->list)))
+					break;
+				e = (struct stab_struct_element *)IExec->GetSucc((struct Node *)e);
+			}
+
+		}
+		break;
+
+		default:
+			break;
+	}
+	return node;
+}
+
+void locals_populate_list(struct Node *node)
+{
+    struct Node *n = node;
 
     struct List *l = &(current_function->symbols);
     struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
 
+	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
     if (s)
     while (1)
     {
-        TEXT buf[1024];
-        
-        char *str = print_variable_value(s);
-        //add_freelist (&loc_freelist, 256, str);
-        //char *namestr = IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
-        //add_freelist (&loc_freelist, 1024, namestr);
-
-        if (s->type && s->type->type == T_POINTER)
-            IUtility->SNPrintf(buf, sizeof(buf), "*%s", s->name);
-        else
-            IUtility->SNPrintf(buf, sizeof(buf), "%s", s->name);
-
-        if (node = IListBrowser->AllocListBrowserNode(2,
-                                                LBNA_Column, 0,
-                                                LBNCA_CopyText, TRUE,
-                                                LBNCA_Text, buf,
-                                                LBNA_Column, 1,
-                                                LBNCA_CopyText, TRUE,
-                                                LBNCA_Text, str,
-                                                TAG_DONE))
-                                    {
-                                        IExec->AddTail(&variablelist, node);
-                                    }
-        if ((struct Node *)s == IExec->GetTail(l))
+    	n = variables_add_children(n, s, 1, FALSE); //not hidden
+    	
+		if ((struct Node *)s == IExec->GetTail(l))
             break;
         s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
     }
-
-    if (localswin)
-        IIntuition->RefreshGadgets ((struct Gadget *)LocalsListBrowserObj, localswin, NULL);
+	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+	
+	locals_list_populated = 1;
 }
 
-void locals_freelist()
+void globals_populate_list(struct Node *node)
 {
-    /* TODO: free strings */
-    if(!IsListEmpty(&variablelist))
-    {
-        IListBrowser->FreeListBrowserList(&variablelist);
+    struct Node *n = node;
 
-        freelist (&loc_freelist);
+    struct List *l = &global_symbols;
+    struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
+
+	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+    if (s)
+    while (1)
+    {
+    	n = variables_add_children(n, s, 1, FALSE); //not hidden
+    	
+		if ((struct Node *)s == IExec->GetTail(l))
+            break;
+        s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
+    }
+	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+	
+	globals_list_populated = 1;
+}
+
+void add_register(char *reg, char *value)
+{
+	struct Node *node;
+	if (node = IListBrowser->AllocListBrowserNode(2,
+												LBNA_Generation, 3,
+												LBNA_Flags, LBFLG_HIDDEN,
+            									LBNA_Column, 0,
+            										LBNCA_CopyText, TRUE,
+                									LBNCA_Text, reg,
+												LBNA_Column, 1,
+													LBNCA_CopyText, TRUE,
+													LBNCA_Text, value,
+            									TAG_DONE))
+        							{
+							            IExec->AddTail(&variable_list, node);
+									}
+}
+
+
+void registers_populate_list()
+{
+	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+
+	char tempstr[256];
+	char tempstr2[256];
+	struct Node *node;
+	
+	if (node = IListBrowser->AllocListBrowserNode(2,
+												LBNA_Generation, 2,
+												LBNA_Flags, LBFLG_HIDDEN|LBFLG_HASCHILDREN,
+            									LBNA_Column, 0,
+            										LBNCA_CopyText, TRUE,
+                									LBNCA_Text, "system",
+            									TAG_DONE))
+        							{
+							            IExec->AddTail(&variable_list, node);
+									}
+
+	sprintf(tempstr, "0x%x", context_copy.msr);
+		add_register ("msr", tempstr);
+	sprintf(tempstr, "0x%x", context_copy.ip);
+		add_register ("ip", tempstr);
+	sprintf(tempstr, "0x%x", context_copy.cr);
+		add_register ("cr", tempstr);
+	sprintf(tempstr, "0x%x", context_copy.xer);
+		add_register ("xer", tempstr);
+	sprintf(tempstr, "0x%x", context_copy.ctr);
+		add_register ("ctr", tempstr);
+	sprintf(tempstr, "0x%x", context_copy.lr);
+		add_register ("lr", tempstr);
+
+	if (node = IListBrowser->AllocListBrowserNode(2,
+												LBNA_Generation, 2,
+												LBNA_Flags, LBFLG_HIDDEN|LBFLG_HASCHILDREN,
+            									LBNA_Column, 0,
+            										LBNCA_CopyText, TRUE,
+                									LBNCA_Text, "gpr",
+            									TAG_DONE))
+        							{
+							            IExec->AddTail(&variable_list, node);
+									}
+
+	int i;
+	for (i = 0; i < 32; i++)
+	{
+		sprintf(tempstr, "0x%x", context_copy.gpr[i]);
+		sprintf(tempstr2, "gpr%d", i);
+			add_register (tempstr2, tempstr);
+	}
+
+	if (node = IListBrowser->AllocListBrowserNode(2,
+												LBNA_Generation, 2,
+												LBNA_Flags, LBFLG_HIDDEN|LBFLG_HASCHILDREN,
+            									LBNA_Column, 0,
+            										LBNCA_CopyText, TRUE,
+                									LBNCA_Text, "fpr",
+            									TAG_DONE))
+        							{
+							            IExec->AddTail(&variable_list, node);
+									}
+
+	for (i = 0; i < 32; i++)
+	{
+		sprintf(tempstr, "%e", context_copy.fpr[i]);
+		sprintf(tempstr2, "fpr%d", i);
+			add_register (tempstr2, tempstr);
+	}
+	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+}
+
+void update_register(struct Node *n, char *valuestr)
+{
+	IListBrowser->SetListBrowserNodeAttrs(n,
+										LBNA_Column, 1,
+											LBNCA_Text, valuestr,
+										TAG_END);
+}
+
+void registers_update()
+{
+	struct Node *n = IExec->GetSucc(registers_node);
+
+	char tempstr[256];
+	
+	n = IExec->GetSucc(n);
+	sprintf(tempstr, "0x%x", context_copy.msr);
+		update_register(n, tempstr);
+		n = IExec->GetSucc(n);
+	sprintf(tempstr, "0x%x", context_copy.ip);
+		update_register (n, tempstr);
+		n = IExec->GetSucc(n);
+	sprintf(tempstr, "0x%x", context_copy.cr);
+		update_register (n, tempstr);
+		n = IExec->GetSucc(n);
+	sprintf(tempstr, "0x%x", context_copy.xer);
+		update_register (n, tempstr);
+		n = IExec->GetSucc(n);
+	sprintf(tempstr, "0x%x", context_copy.ctr);
+		update_register (n, tempstr);
+		n = IExec->GetSucc(n);
+	sprintf(tempstr, "0x%x", context_copy.lr);
+		update_register (n, tempstr);
+		n = IExec->GetSucc(n);
+
+	n = IExec->GetSucc(n);
+	int i;
+	for (i = 0; i < 32; i++)
+	{
+		sprintf(tempstr, "0x%x", context_copy.gpr[i]);
+			update_register (n, tempstr);
+			n = IExec->GetSucc(n);
+	}
+	n = IExec->GetSucc(n);
+	for (i = 0; i < 32; i++)
+	{
+		sprintf(tempstr, "%e", context_copy.fpr[i]);
+			update_register (n, tempstr);
+			n = IExec->GetSucc(n);
+	}
+}	
+
+void variables_init_parents()
+{
+	if (globals_node = IListBrowser->AllocListBrowserNode(2,
+		        								LBNA_Generation, 1,
+		        								LBNA_Flags, LBFLG_HASCHILDREN,
+                                                LBNA_Column, 0,
+                                                	LBNCA_CopyText, TRUE,
+                                                	LBNCA_Text, "globals",
+                                                TAG_DONE))
+    {
+       	IExec->AddTail(&variable_list, globals_node);
+    }
+
+	if (locals_node = IListBrowser->AllocListBrowserNode(2,
+		        								LBNA_Generation, 1,
+		        								LBNA_Flags, LBFLG_HASCHILDREN,
+                                                LBNA_Column, 0,
+                                                	LBNCA_CopyText, TRUE,
+                                                	LBNCA_Text, "locals",
+                                                TAG_DONE))
+    {
+       	IExec->AddTail(&variable_list, locals_node);
+    }
+    if(registers_node = IListBrowser->AllocListBrowserNode(2,
+		        								LBNA_Generation, 1,
+		        								LBNA_Flags, LBFLG_HASCHILDREN,
+                                                LBNA_Column, 0,
+                                                	LBNCA_CopyText, TRUE,
+                                                	LBNCA_Text, "registers",
+                                                TAG_DONE))
+    {
+       	IExec->AddTail(&variable_list, registers_node);
     }
 }
 
-
-void locals_open_window()
+void update_variables()
 {
-    if (localswin)
-        return;
+	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	struct Node *n = IExec->GetHead(&variable_list);
+	if(n)
+	while(1)
+	{
+		if (n == registers_node)
+            break;
 
-    if (!hasfunctioncontext)
-        return;
+		if(n != locals_node && n != globals_node)
+		{
+			struct variables_userdata *u;
+			uint32 flags;
+			IListBrowser->GetListBrowserNodeAttrs(n,
+												LBNA_UserData, &u,
+												LBNA_Flags, &flags,
+												TAG_END);
+			if(u && u->s && !u->haschildren)
+			{
+				char *str = print_variable_value(u->s);
+				IListBrowser->SetListBrowserNodeAttrs(n,
+												LBNA_Column, 1,
+													LBNCA_Text, str,
+												TAG_END);
+			}
+		}
+        n = IExec->GetSucc(n);
+	}
+	registers_update();
+	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+}
+	
+void locals_update()
+{
+	if(current_function != variables_shown_function)
+	{
+		//if function has changed:
+		locals_clear();
+	    IExec->NewList (&variable_list);
+	    globals_list_populated = 0;
+	    locals_list_populated = 0;
+	    variables_init_parents();
+		//locals_populate_list(locals_node);
+		registers_populate_list();
+	}
+	else
+	{
+		update_variables();
+	}
+	variables_shown_function = current_function;
+}
 
-    IExec->NewList (&variablelist);
-    IExec->NewList (&loc_freelist);
+void locals_handle_input()
+{
+	struct Node *n;
+	if(IIntuition->GetAttr(LISTBROWSER_SelectedNode, VariablesListBrowserObj, (uint32 *)&n))
+	{
+		if(n == globals_node && !globals_list_populated)
+		{
+			globals_populate_list(globals_node);
+			return;
+		}
+		if(n == locals_node && !locals_list_populated)
+		{
+			locals_populate_list(locals_node);
+			return;
+		}
+		struct variables_userdata *u;
+		int32 gen;
+		IListBrowser->GetListBrowserNodeAttrs(n,
+												LBNA_UserData, &u,
+												LBNA_Generation, &gen,
+												TAG_END);
+		if(u && u->haschildren && !u->isopen)
+		{
+			IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+			variables_add_children(n, u->s, gen, FALSE);
+			u->isopen = 1;
+			IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+		}
+	}
+}
 
-    localscolumninfo = IListBrowser->AllocLBColumnInfo(2,
+void locals_init()
+{
+	IExec->NewList(&variable_list);
+	locals_freemem_hook = freemem_alloc_hook();
+	
+    variablescolumninfo = IListBrowser->AllocLBColumnInfo(2,
         LBCIA_Column, 0,
             LBCIA_Title, "Variable",
-            LBCIA_Sortable, TRUE,
-            LBCIA_AutoSort, TRUE,
-            LBCIA_SortArrow, TRUE,
+			LBCIA_Width, 200,
             LBCIA_DraggableSeparator, TRUE,
         LBCIA_Column, 1,
             LBCIA_Title, "Value",
         TAG_DONE);
-
-
-    /* Create the window object. */
-    if(( LocalsWinObj = WindowObject,
-            WA_ScreenTitle, "Debug 101",
-            WA_Title, "Locals",
-            WA_Width, 400,
-            WA_Height, 400,
-            WA_DepthGadget, TRUE,
-            WA_SizeGadget, TRUE,
-            WA_DragBar, TRUE,
-            WA_CloseGadget, TRUE,
-            WA_Activate, TRUE,
-            WINDOW_Position, WPOS_CENTERSCREEN,
-            /* there is no HintInfo array set up here, instead we define the 
-            ** strings directly when each gadget is created (OM_NEW)
-            */
-            WINDOW_GadgetHelp, TRUE,
-            WINDOW_ParentGroup, VLayoutObject,
-                LAYOUT_SpaceOuter, TRUE,
-                LAYOUT_DeferLayout, TRUE,
-
-                LAYOUT_AddChild, LocalsListBrowserObj = ListBrowserObject,
-                    GA_ID,                      SYMBOL_LISTBROWSER,
-                    GA_RelVerify,               TRUE,
-                    GA_TabCycle,                TRUE,
-                    LISTBROWSER_AutoFit,        TRUE,
-                    LISTBROWSER_Labels,         &variablelist,
-                    LISTBROWSER_ColumnInfo,     localscolumninfo,
-                    LISTBROWSER_ColumnTitles,   TRUE,
-                    //LISTBROWSER_ShowSelected,   TRUE, /* not really needed yet */
-                    LISTBROWSER_Striping,       LBS_ROWS,
-                    LISTBROWSER_SortColumn,     0,
-                    LISTBROWSER_TitleClickable, TRUE,
-                ListBrowserEnd,
-
-                LAYOUT_AddChild, LocalsButtonObj = ButtonObject,
-                    GA_ID, SYMBOL_BUTTON,
-                    GA_RelVerify, TRUE,
-                    GA_Text, "Done",
-                ButtonEnd,
-                CHILD_WeightedHeight, 0,
-            EndMember,
-        EndWindow))
-    {
-        /*  Open the window. */
-        if( localswin = (struct Window *) RA_OpenWindow(LocalsWinObj) )
-        {
-            locals_update_window();
-        }
-    }
 }
 
-uint32 locals_obtain_window_signal()
+void locals_cleanup()
 {
-    uint32 signal = 0x0;
-    if (localswin)
-        IIntuition->GetAttr( WINDOW_SigMask, LocalsWinObj, &signal );
-
-    return signal;
+	IListBrowser->FreeLBColumnInfo(variablescolumninfo);
+	IListBrowser->FreeListBrowserList(&variable_list);
+	if(locals_freemem_hook >= 0)
+		freemem_free_hook(locals_freemem_hook);
 }
 
-
-void locals_event_handler()
+void locals_clear()
 {
-    ULONG wait, signal, result;
-    BOOL done = FALSE;
-    WORD Code;
-    CONST_STRPTR hintinfo;
-    int32 selected;
-    
-    /* Obtain the window wait signal mask. */
-    //IIntuition->GetAttr( WINDOW_SigMask, WinObj, &signal );
-    
-    while ((result = RA_HandleInput(LocalsWinObj, &Code)) != WMHI_LASTMSG)
+	variables_shown_function = NULL;
+	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+    if(!IsListEmpty(&variable_list))
     {
-        switch (result & WMHI_CLASSMASK)
-        {
-            case WMHI_CLOSEWINDOW:
-                done = TRUE;
-                break;
-             case WMHI_GADGETUP:
-                switch(result & WMHI_GADGETMASK)
-                {
-                    case SYMBOL_LISTBROWSER:
-                        /* clicking variables is ignored for now */
-                        break;
-                        
-                    case SYMBOL_BUTTON:
-                        done = TRUE;
-                        break;
-                }
-                break;
-        }
-        
-        if( done )
-        {
-            locals_close_window();
-        }
+        IListBrowser->FreeListBrowserList(&variable_list);
+		freemem_clear(locals_freemem_hook);
     }
+	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
 }
-
-void locals_close_window()
-{
-    if (localswin)
-    {
-        /* Disposing of the window object will
-         * also close the window if it is
-         * already opened and it will dispose of
-         * all objects attached to it.
-         */
-        IIntuition->DisposeObject( LocalsWinObj );
-        
-        locals_freelist();
-        IListBrowser->FreeLBColumnInfo(localscolumninfo);
-        
-        localswin = NULL;
-    }
-    
-    return;
-
-}
-

@@ -5,42 +5,31 @@
 
 #include "suspend.h"
 #include "stabs.h"
+#include "freemem.h"
+#include "console.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
-uint32 builtin_typetable[] =
-{
-	T_UNKNOWN,
-	T_32,
-	T_U8,
-	T_32,
-	T_U32,
-	T_U32,
-	T_U32,
-	T_BOOL,
-	T_16,
-	T_U16,
-	T_8,
-	T_U8,
-	T_FLOAT32,
-	T_FLOAT64,
-	T_FLOAT64,
-	T_32,
-	T_64,
-	T_UNKNOWN, //T_128
-	T_VOID
-};
+//debug stuff
+#include <proto/exec.h>
+#define dprintf(format...)	IExec->DebugPrintF(format)
 
-int numberofbuiltintypes = 19;
+
+#define MAX_NESTED_INCLUDES 256
 
 struct List global_symbols;
 struct List sourcefile_list;
 struct List function_list;
 
+#if 0
 BOOL stabs_has_functions = FALSE;
 BOOL stabs_has_sourcefiles = FALSE;
 BOOL stabs_has_globals = FALSE;
+#endif
+
+int stabs_freemem_hook = -1;
 
 struct stab_function *stabs_get_function_from_address (uint32 faddress)
 {
@@ -74,19 +63,26 @@ void stabs_interpret_functions ()
 	char *stabstr = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stabstr", TAG_DONE);
 	uint32 *stab = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	if (!stab)
+	{
+		printf("failed to find .stab section...\n");
 		return;
+	}
 
 	Elf32_Shdr *header = IElf->GetSectionHeaderTags (exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	uint32 stabsize = header->sh_size;
 	struct symtab_entry *sym = (struct symtab_entry *)stab;
 	char *sourcename = NULL;
+	char *solname = NULL;
+	char *includename[MAX_NESTED_INCLUDES];
+	int includelevel = FALSE;
+	int soloverride = FALSE;
 	struct stab_symbol *symbol;
 	BOOL ispointer = FALSE;
 	char *strptr;
 	struct stab_function *f;
 
 	IExec->NewList (&function_list);
-	stabs_has_functions = TRUE;
+	//stabs_has_functions = TRUE;
 
 
 	while ((uint32)sym < (uint32)stab + stabsize - sizeof (struct symtab_entry))
@@ -96,20 +92,54 @@ void stabs_interpret_functions ()
 		case N_SO:
 			{
 			sourcename = &stabstr[sym->n_strx];
+			if(includelevel > 0)
+				printf("Source file malfunction...\n");
+			soloverride = FALSE;
 			}
 			break;
-
-		case N_FUN:
-
+			
+		case N_SOL:
 			{
-				//we reached the right symbol
-				f = IExec->AllocMem (sizeof (struct stab_function), MEMF_ANY|MEMF_CLEAR);
+			solname = &stabstr[sym->n_strx];
+			soloverride = TRUE;
+			}
+			break;
+						
+		case N_BINCL:
+			{
+			if(includelevel >= MAX_NESTED_INCLUDES)
+				printf("Fatal error: MAX_NESTED_INCLUDES overridden!!!\n");
+			includename[includelevel] = &stabstr[sym->n_strx];
+			includelevel++;
+			soloverride = FALSE;
+			}
+			break;
+		
+		case N_EINCL:
+			{
+			if(includelevel <= 0)
+				printf("Fatal error: negative include level!!!\n");
+			includelevel--;
+			}
+			break;
+			
+		case N_FUN:
+			{
+				f = freemem_malloc(stabs_freemem_hook, sizeof (struct stab_function));
 
 				uint32 line = 0;
-
+				int brac = 0;
+				int bracstart = 0;
+				int size = 0;
+				
 				f->name = stabs_strdup_strip(&stabstr[sym->n_strx]);
 				f->address = sym->n_value;
-				f->sourcename = strdup (sourcename);
+				if(includelevel && !soloverride)
+					f->sourcename = strdup(includename[includelevel-1]);
+				else if (soloverride)
+					f->sourcename = strdup(solname);
+				else
+					f->sourcename = strdup (sourcename);
 				f->currentline = 0;
 				f->numberoflines = 0;
 				IExec->NewList (&(f->symbols));
@@ -123,28 +153,42 @@ void stabs_interpret_functions ()
 
 					switch (sym->n_type)
 					{
+					case N_LBRAC:
+						brac++;
+						if(brac==1)
+							bracstart = sym->n_value;
+						break;
+						
 					case N_RBRAC:
+						brac--;
+						if(brac == 0)
+						{
+							f->size = sym->n_value; //should this be n_value-bracstart??
+							done = TRUE;
+						}
+						if(brac<0)
+							printf("Closing bracket without opening bracket!!!\n");
 
-						f->size = sym->n_value;
-						done = TRUE;
 						break;
 
 					case N_SLINE:
-
 						f->lines[f->numberoflines] = sym->n_value;
 						f->lineinfile[f->numberoflines] = sym->n_desc;
 						if (line > sym->n_desc)
 							f->linetype[f->numberoflines] = LINE_LOOP;
 						else
+						{
+							size = sym->n_value+4;
 							f->linetype[f->numberoflines] = LINE_NORMAL;
+						}
 						f->numberoflines++;
 						line = sym->n_desc;
 
 						break;
 
 					case N_LSYM:
-
-						symbol = IExec->AllocMem (sizeof(struct stab_symbol), MEMF_ANY|MEMF_CLEAR);
+					
+						symbol = freemem_malloc(stabs_freemem_hook, sizeof(struct stab_symbol));
 
 						strptr = &stabstr[sym->n_strx];
 						symbol->name = stabs_strdup_strip (strptr);
@@ -154,14 +198,29 @@ void stabs_interpret_functions ()
 						symbol->offset = sym->n_value;
 
 						IExec->AddTail(&(f->symbols), (struct Node *)symbol);
+
 						break;
 
+					case N_SOL:
+
+						solname = f->sourcename = strdup(&stabstr[sym->n_strx]);
+						soloverride = TRUE;
+						break;
+						
 					case N_FUN:
 
-						f->size = sym->n_value - f->address;
+						f->size = size;
 
 						sym--;
 						done = TRUE;
+						break;
+					
+					case N_SO:
+					
+						f->size = size;
+						sym--;
+						done = TRUE;
+
 						break;
 
 					default:
@@ -171,41 +230,14 @@ void stabs_interpret_functions ()
 				IExec->AddTail (&function_list, (struct Node *)f);
 			}
 			break;
+			
+			default:
+				break;
 
 		}
 		sym++;
 	}
 }
-
-void stabs_free_functions()
-{
-	if (!stabs_has_functions)
-		return;
-
-	struct stab_function *f = (struct stab_function *)IExec->GetHead (&function_list);
-	while (f)
-	{
-		struct stab_function *fnext = (struct stab_function *)IExec->GetSucc((struct Node *)f);
-		IExec->Remove ((struct Node*)f);
-
-		//free symbols:
-		struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (&(f->symbols));
-		while (s)
-		{
-			struct stab_symbol *snext = (struct stab_symbol *)IExec->GetSucc ((struct Node*)s);
-
-			IExec->Remove ((struct Node *)s);
-			IExec->FreeMem (s, sizeof (struct stab_symbol));
-
-			s = snext;
-		}
-
-		IExec->FreeMem (f, sizeof(struct stab_function));
-		f = fnext;
-	}
-	stabs_has_functions = FALSE;
-}
-
 
 char *skip_in_string (char *source, char *pattern)
 {
@@ -227,7 +259,7 @@ char *skip_in_string (char *source, char *pattern)
 		else
 			ptr++;
 	}
-	return NULL;
+	return ptr; //return a null string
 }
 
 char *skip_backwards_in_string (char *source, char *end, char *pattern)
@@ -256,7 +288,7 @@ char *skip_backwards_in_string (char *source, char *end, char *pattern)
 
 char *strdup_until (char *source, char key)
 {
-	char *ret = IExec->AllocMem (256, MEMF_ANY|MEMF_CLEAR);
+	char *ret = freemem_malloc(stabs_freemem_hook, 256);
 	int i;
 	while (source[i] != key && source[i] != '\0')
 	{
@@ -266,21 +298,6 @@ char *strdup_until (char *source, char key)
 	ret[i] = '\0';
 
 	return ret;
-}
-
-uint32 stabs_interpret_number_token (char *strptr, uint32 *array)
-{
-	if ( (*strptr != '(') &&
-		!( '0' <= *strptr && *strptr <= '9') )
-		strptr++;
-
-	if (*strptr == '(')
-	{
-		strptr++;
-		*array = atoi (strptr);
-		strptr = skip_in_string (strptr, ",");
-	}
-	return atoi (strptr);
 }
 
 struct stab_sourcefile *stabs_get_sourcefile (char *sourcename)
@@ -300,7 +317,25 @@ struct stab_sourcefile *stabs_get_sourcefile (char *sourcename)
 	return NULL;
 }
 
-struct stab_typedef *stabs_get_type_from_token (struct stab_sourcefile *sourcefile, uint32 array, uint32 number)
+int stabs_interpret_number_token(char *strptr, int *filenum)
+{
+	if(!strptr)	return -1;
+
+	if ( (*strptr != '(') &&
+		!( '0' <= *strptr && *strptr <= '9') )
+		strptr++;
+
+	*filenum = 0;
+	if (*strptr == '(')
+	{
+		strptr++;
+		*filenum = atoi (strptr);
+		strptr = skip_in_string (strptr, ",");
+	}
+	return atoi (strptr);
+}
+
+struct stab_typedef *stabs_get_type_from_typenum (struct stab_sourcefile *sourcefile, int filenum, int typenum)
 {
 	struct stab_typedef *ret = NULL;
 	BOOL done = FALSE;
@@ -309,11 +344,11 @@ struct stab_typedef *stabs_get_type_from_token (struct stab_sourcefile *sourcefi
 		return NULL;
 
 	struct stab_typedef *t = (struct stab_typedef *)IExec->GetHead(&(sourcefile->typedef_list));
-
+	
 	if (t)
 	while (!done)
 	{
-		if (t->array == array && t->number == number)
+		if (t->filenum == filenum && t->typenum == typenum)
 			return t;
 
 		if ( t == (struct stab_typedef *)IExec->GetTail (&(sourcefile->typedef_list)) )
@@ -323,21 +358,142 @@ struct stab_typedef *stabs_get_type_from_token (struct stab_sourcefile *sourcefi
 
 	return NULL;
 }
-				
-struct stab_typedef *copy_typedef(struct stab_typedef *source)
-{
-	if (!source)
-		return NULL;
-	struct stab_typedef *dest = IExec->AllocMem(sizeof (struct stab_typedef), MEMF_ANY|MEMF_CLEAR);
-	dest->name = source->name;
-	dest->type = source->type;
-	dest->array = source->array;
-	dest->number = source->number;
 
-	return dest;
+enum __stab_symbol_types stabs_interpret_range(char *strptr)
+{
+	if(*strptr != 'r')
+		return T_UNKNOWN;
+	strptr = skip_in_string(strptr, ";");
+	if(!strptr)
+		return T_UNKNOWN;
+	long long lower_bound = atoi(strptr);
+	strptr = skip_in_string(strptr, ";");
+	long long upper_bound = atoi(strptr);
+	enum __stab_symbol_types ret = T_UNKNOWN;
+	if(lower_bound == 0 && upper_bound == -1)
+		;
+	else if(lower_bound > 0 && upper_bound == 0)
+	{
+		switch(lower_bound)
+		{
+			case 4:
+				ret = T_FLOAT32;
+				break;
+			case 8:
+				ret = T_FLOAT64;
+				break;
+			case 16:
+				ret = T_FLOAT128;
+				break;
+			default:
+				ret = T_UNKNOWN;
+				break;
+		}
+	}
+	else
+	{
+		long long range = upper_bound - lower_bound;
+		if(lower_bound < 0)
+		{
+			if(range <= 0xff)
+				ret = T_8;
+			else if(range <= 0xffff)
+				ret = T_16;
+			else if(range <= 0xffffffff)
+				ret = T_32;
+			//else if(range <= 0xffffffffffffffff)
+			//	ret = T_64;
+			//else if(range <= 0xffffffffffffffffffffffffffffffff)
+			//	ret = T_128;
+			else
+				ret = T_UNKNOWN;
+		}
+		else // if unsigned
+		{
+			if(range <= 0xff)
+				ret = T_U8;
+			else if(range <= 0xffff)
+				ret = T_U16;
+			else if(range <= 0xffffffff)
+				ret = T_U32;
+			//else if(range <= 0xffffffffffffffff)
+			//	ret = T_U64;
+			//else if(range <= 0xffffffffffffffffffffffffffffffff)
+			//	ret = T_U128;
+			else
+				ret = T_UNKNOWN;
+		}
+	}
+	return ret;
 }
 
-	
+char *stabs_skip_numbers(char *strptr)
+{
+	char *ret = strptr;
+	while(*ret >= '0' && *ret <= '9')
+		ret++;
+	return ret;
+}
+
+struct stab_structure * stabs_interpret_struct_or_union(char *strptr, char *sourcename)
+{
+	struct stab_sourcefile *file = stabs_get_sourcefile(sourcename);
+	struct stab_structure *s = freemem_malloc(stabs_freemem_hook, sizeof(struct stab_structure));
+	IExec->NewList(&(s->list));
+	s->size = atoi(strptr);
+	strptr = stabs_skip_numbers(strptr);
+	while(*strptr != ';')
+	{
+		struct stab_struct_element *e = freemem_malloc(stabs_freemem_hook, sizeof(struct stab_struct_element));
+		e->name = stabs_strdup_strip(strptr);
+		strptr = skip_in_string(strptr, ":");
+		e->type = stabs_get_type_from_string(strptr, sourcename);
+		if(!e->type)
+		{
+			//IExec->FreeVec(e);
+			return NULL;
+		}
+		if(e->type->type == T_CONFORMANT_ARRAY || (e->type->type == T_POINTER && e->type->points_to->type == T_CONFORMANT_ARRAY))
+		{
+			strptr = skip_in_string(strptr, "=x");	//skip over 'unknown size' marker
+			strptr++;								//skip over 's' or 'u' or 'a'
+			strptr = skip_in_string(strptr, ":");	//skip to the numerals
+			if(*strptr != ',')
+			{
+				e->bitoffset = -1;
+				e->bitsize = -1;
+				IExec->AddTail(&(s->list), (struct Node *)e);
+				return s;
+			}
+		}
+		else
+			strptr = skip_in_string(strptr, "),");
+		e->bitoffset = atoi(strptr);
+		strptr = skip_in_string(strptr, ",");
+		e->bitsize = atoi(strptr);
+		strptr = skip_in_string(strptr, ";");
+		IExec->AddTail (&(s->list), (struct Node *)e);
+	}
+	return s;
+}
+
+struct stab_enum * stabs_interpret_enum(char *strptr, char *sourcename)
+{
+	struct stab_sourcefile *file = stabs_get_sourcefile(sourcename);
+	struct stab_enum *s = freemem_malloc(stabs_freemem_hook, sizeof(struct stab_enum));
+	IExec->NewList(&(s->list));
+	while(*strptr != ';' && *strptr != '\0')
+	{
+		struct stab_enum_element *e = freemem_malloc(stabs_freemem_hook, sizeof(struct stab_enum_element));
+		e->name = stabs_strdup_strip(strptr);
+		strptr = skip_in_string(strptr, ":");
+		e->value = atoi(strptr);
+		strptr = skip_in_string(strptr, ",");
+		IExec->AddTail(&(s->list), (struct Node *)e);
+	}
+	return s;
+}
+
 struct stab_typedef * stabs_get_type_from_string (char *strptr, char *sourcename)
 {
 	if (!sourcename)
@@ -346,44 +502,148 @@ struct stab_typedef * stabs_get_type_from_string (char *strptr, char *sourcename
 		return NULL;
 
 	BOOL ispointer = FALSE;
-
-	char *ptr = strptr;
-
-	uint32 array = 0;
-	uint32 typenum = stabs_interpret_number_token (ptr, &array);
-
+	BOOL isarray = FALSE;
+	int array_lowerbound = 0;
+	int array_upperbound = 0;
+	int filenum = 0, typenum = 0;
+	struct stab_typedef *t = NULL;
+	
 	struct stab_sourcefile *file = stabs_get_sourcefile (sourcename);
-	struct stab_typedef *t = stabs_get_type_from_token (file, array, typenum);
+	
+	typenum = stabs_interpret_number_token(strptr, &filenum);
+	t = stabs_get_type_from_typenum (file, filenum, typenum);
 
-	if (!t)
+	if(!t)
 	{
-		if (array == 0 && typenum < 19)
+		strptr = skip_in_string (strptr, "=");
+		if (!strptr || *strptr == '\0')
+			return NULL;
+		if (*strptr == '*')
 		{
-			//internal types
-			t = IExec->AllocMem (sizeof (struct stab_typedef), MEMF_ANY|MEMF_CLEAR);
-			t->name = "INTERNAL";
-			t->type = builtin_typetable[typenum];
-			t->array = 0;	
-			t->number = typenum;
+			ispointer = TRUE;
+			strptr++;
+		}
+		if (*strptr == 'a')
+		{
+			isarray = TRUE;
+			strptr = skip_in_string(strptr, ")");
+			if(*strptr == '=' && strptr++ && *strptr == 'r')
+			{
+				//skip additional range info
+				int i;
+				for (i = 0; i < 3; i++)
+					strptr = skip_in_string(strptr, ";");
+			}
+			else if(*strptr == ';')
+			{
+				strptr++;
+				array_lowerbound = atoi(strptr);
+				strptr = skip_in_string(strptr, ";");
+				array_upperbound = atoi(strptr);
+				strptr = skip_in_string(strptr, ";");
+				int size = array_upperbound - array_lowerbound;
+				t = stabs_get_type_from_string(strptr, sourcename);
+				struct stab_typedef *newt = freemem_malloc(stabs_freemem_hook, sizeof (struct stab_typedef));
+				newt->name = NULL;
+				newt->filenum = filenum;
+				newt->typenum = typenum;
+				newt->type = T_ARRAY;
+				newt->arraysize = size;
+				newt->points_to = t;
+				IExec->AddTail (&(file->typedef_list), (struct Node *)newt);
+				t = newt;
+			}
+		}
+		else if(*strptr == 'r')
+		{
+			enum __stab_symbol_types type = stabs_interpret_range(strptr);
+			t = freemem_malloc(stabs_freemem_hook, sizeof (struct stab_typedef));
+			t->name = NULL;
+			t->filenum = filenum;
+			t->typenum = typenum;
+			t->type = type;
 			t->points_to = NULL;
 			IExec->AddTail (&(file->typedef_list), (struct Node *)t);
 		}
+		else if(*strptr == 's')
+		{
+			// structure
+			t = freemem_malloc(stabs_freemem_hook, sizeof (struct stab_typedef));
+			t->filenum = filenum;
+			t->typenum = typenum;
+			t->type = T_STRUCT;
+			t->points_to = NULL;
+			IExec->AddTail (&(file->typedef_list), (struct Node *)t); // has to do this before to be able to have pointers to instances of self in the struct
+			struct stab_structure *s = stabs_interpret_struct_or_union(++strptr, sourcename);
+			t->struct_ptr = s;
+		}
+		else if (*strptr == 'u')
+		{
+			// union
+			struct stab_structure *s = stabs_interpret_struct_or_union(++strptr, sourcename);
+			t = freemem_malloc(stabs_freemem_hook, sizeof (struct stab_typedef));
+			t->filenum = filenum;
+			t->typenum = typenum;
+			t->type = T_UNION;
+			t->struct_ptr = s;
+			t->points_to = NULL;
+			IExec->AddTail (&(file->typedef_list), (struct Node *)t);
+		}
+		else if (*strptr == 'e')
+		{
+			// union
+			struct stab_enum *s = stabs_interpret_enum(++strptr, sourcename);
+			t = freemem_malloc(stabs_freemem_hook, sizeof (struct stab_typedef));
+			t->filenum = filenum;
+			t->typenum = typenum;
+			t->type = T_ENUM;
+			t->enum_ptr = s;
+			t->points_to = NULL;
+			IExec->AddTail (&(file->typedef_list), (struct Node *)t);
+		}
+		else if(*strptr == 'x')	//unknown size
+		{
+			strptr++;
+
+			t = freemem_malloc(stabs_freemem_hook, sizeof(struct stab_typedef));
+			t->filenum = filenum;
+			t->typenum = typenum;
+			t->type = T_CONFORMANT_ARRAY;
+			t->struct_ptr = NULL;
+			t->points_to = NULL;
+			IExec->AddTail(&(file->unknown_list), (struct Node *)t);
+		}
 		else
 		{
-			strptr = skip_in_string (strptr, "=");
-			if (!strptr)
-				return NULL;
-			if (*strptr == '*')
-				ispointer = TRUE;
+			if(*strptr == '(')
+			{
+				int filenum2, typenum2;
+				typenum2 = stabs_interpret_number_token(strptr, &filenum2);
+				if (typenum2 == typenum && filenum2 == filenum)
+				{
+					// void
+					struct stab_typedef *t = freemem_malloc(stabs_freemem_hook, sizeof (struct stab_typedef));
+					
+					t->name = NULL;
+					t->filenum = filenum;
+					t->typenum = typenum;
+					t->type = T_VOID;
+					IExec->AddTail (&(file->typedef_list), (struct Node *)t);
+					return t;
+				}
+				
+			}
+
 			t = stabs_get_type_from_string(strptr, sourcename);
 
 			if (t)
 			{
-				struct stab_typedef *newt = IExec->AllocMem (sizeof (struct stab_typedef), MEMF_ANY|MEMF_CLEAR);
+				struct stab_typedef *newt = freemem_malloc(stabs_freemem_hook, sizeof (struct stab_typedef));
 				newt->name = NULL;
-				newt->array = array;
-				newt->number = typenum;
-				if (ispointer)
+				newt->filenum = filenum;
+				newt->typenum = typenum;
+				
+				if(ispointer)
 				{
 					newt->type = T_POINTER;
 					newt->points_to = t;
@@ -391,7 +651,10 @@ struct stab_typedef * stabs_get_type_from_string (char *strptr, char *sourcename
 				else
 				{
 					newt->type = t->type;
-					newt->points_to = t->points_to;
+					if(t->points_to)
+						newt->points_to = t->points_to;
+					else
+						newt->points_to = t;
 				}
 				IExec->AddTail (&(file->typedef_list), (struct Node *)newt);
 				t = newt;
@@ -401,9 +664,6 @@ struct stab_typedef * stabs_get_type_from_string (char *strptr, char *sourcename
 	return t;
 }
 
-
-
-
 char *stabs_strdup_strip(char *str)
 {
 	int i, j;
@@ -412,7 +672,7 @@ char *stabs_strdup_strip(char *str)
 		if (str[i] == ':' || str[i] == '\0')
 			break;
 
-	ret = IExec->AllocMem(i+1, MEMF_ANY);
+	ret = freemem_malloc(stabs_freemem_hook, i+1);
 
 	for (j = 0; j < i; j++)
 		ret[j] = str[j];
@@ -426,7 +686,7 @@ BOOL str_is_typedef (char *str)
 {
 	char *ptr = str;
 	ptr = skip_in_string (ptr, ":");
-	return (*ptr == 't' ? TRUE : FALSE);
+	return (*ptr == 't' || *ptr == 'T' ? TRUE : FALSE);
 }
 
 
@@ -454,11 +714,12 @@ void stabs_interpret_typedefs()
 
 			if (strlen (&stabstr[sym->n_strx]))
 			{
-				sourcefile = IExec->AllocMem (sizeof (struct stab_sourcefile), MEMF_ANY|MEMF_CLEAR);
+				sourcefile = freemem_malloc(stabs_freemem_hook, sizeof (struct stab_sourcefile));
 
 				sourcefile->filename = strdup(&stabstr[sym->n_strx]);
 				IExec->NewList (&(sourcefile->typedef_list));
 				IExec->NewList (&(sourcefile->function_list));
+				IExec->NewList (&(sourcefile->unknown_list));
 				IExec->AddTail (&sourcefile_list, (struct Node *)sourcefile);
 			}
 			break;
@@ -473,11 +734,12 @@ void stabs_interpret_typedefs()
 			if (str_is_typedef(strptr))
 			{
 				char *name = stabs_strdup_strip (strptr);
-
 				strptr = skip_in_string (strptr, ":");
 				if (strptr)
 				{
-					stabs_get_type_from_string(strptr, sourcefile->filename);
+					struct stab_typedef * t = stabs_get_type_from_string(strptr, sourcefile->filename);
+					if(t)
+						t->name = name;
 				}
 			}
 			break;
@@ -485,36 +747,6 @@ void stabs_interpret_typedefs()
 		sym++;
 	}
 }
-
-void stabs_free_typedefs()
-{
-	if (!stabs_has_sourcefiles)
-		return;
-
-	struct stab_sourcefile *f = (struct stab_sourcefile *)IExec->GetHead (&sourcefile_list);
-	while (f)
-	{
-		struct stab_sourcefile *fnext = (struct stab_sourcefile *)IExec->GetSucc((struct Node *)f);
-		IExec->Remove ((struct Node*)f);
-
-		//free symbols:
-		struct stab_typedef *t = (struct stab_typedef *)IExec->GetHead (&(f->typedef_list));
-		while (t)
-		{
-			struct stab_typedef *tnext = (struct stab_typedef *)IExec->GetSucc ((struct Node*)t);
-
-			IExec->Remove ((struct Node *)t);
-			IExec->FreeMem (t, sizeof (struct stab_typedef));
-
-			t = tnext;
-		}
-
-		IExec->FreeMem (f, sizeof(struct stab_sourcefile));
-		f = fnext;
-	}
-	stabs_has_sourcefiles = FALSE;
-}
-
 
 void stabs_interpret_globals()
 {
@@ -546,7 +778,7 @@ void stabs_interpret_globals()
 			break;
 
 		case N_GSYM:
-			symbol = IExec->AllocMem (sizeof(struct stab_symbol), MEMF_ANY|MEMF_CLEAR);
+			symbol = freemem_malloc(stabs_freemem_hook, sizeof(struct stab_symbol));
 
 			strptr = &stabstr[sym->n_strx];
 			symbol->name = stabs_strdup_strip (strptr);
@@ -563,22 +795,15 @@ void stabs_interpret_globals()
 	}
 }
 
-void stabs_free_globals()
+void stabs_interpret_stabs()
 {
-	if (!stabs_has_globals)
-		return;
+	stabs_freemem_hook = freemem_alloc_hook();
+	stabs_interpret_typedefs();
+	stabs_interpret_functions();
+	stabs_interpret_globals();
+}
 
-		//free symbols:
-		struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (&global_symbols);
-		while (s)
-		{
-			struct stab_symbol *snext = (struct stab_symbol *)IExec->GetSucc ((struct Node*)s);
-
-			IExec->Remove ((struct Node *)s);
-			IExec->FreeMem (s, sizeof (struct stab_symbol));
-
-			s = snext;
-		}
-
-	stabs_has_globals = FALSE;
+void stabs_free_stabs()
+{
+	freemem_free_hook(stabs_freemem_hook);
 }

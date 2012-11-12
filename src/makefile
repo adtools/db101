@@ -17,8 +17,8 @@ RANLIB = $(CROSS_COMPILE)ranlib
 
 all: helloworld ../db101
 
-helloworld: helloworld.c
-	$(CC) -gstabs helloworld.c -o helloworld
+helloworld: helloworld.c helloworld2.c
+	$(CC) -gstabs helloworld.c helloworld2.c -o helloworld
 	$(CC) -gstabs -S helloworld.c
 
 suspend.o: suspend.c suspend.h symbols.h gui.h breakpoints.h
@@ -27,13 +27,13 @@ suspend.o: suspend.c suspend.h symbols.h gui.h breakpoints.h
 symbols.o: symbols.c symbols.h suspend.h stabs.h
 	$(CC) -c -gstabs -o symbols.o symbols.c
 
-gui.o: gui.c gui.h suspend.h stabs.h symbols.h variables.h disassembler.h breakpoints.h stacktrace.h freemem.h
+gui.o: gui.c gui.h suspend.h stabs.h symbols.h variables.h disassembler.h breakpoints.h stacktrace.h freemem.h unix.h
 	$(CC) -c -gstabs -o gui.o gui.c
 
 hexview.o: hexview.c hexview.h suspend.h symbols.h freemem.h
 	$(CC) -c -gstabs -o hexview.o hexview.c
 
-main.o: main.c suspend.h gui.h breakpoints.h
+main.o: main.c suspend.h gui.h breakpoints.h freemem.h
 	$(CC) -c -gstabs -o main.o main.c
 
 stabs.o: stabs.c stabs.h suspend.h freemem.h
@@ -41,12 +41,6 @@ stabs.o: stabs.c stabs.h suspend.h freemem.h
 
 variables.o: variables.c variables.h suspend.h stabs.h gui.h freemem.h
 	$(CC) -c -gstabs -o variables.o variables.c
-
-globals.o: globals.c globals.h suspend.h stabs.h gui.h variables.h freemem.h
-	$(CC) -c -gstabs -o globals.o globals.c
-
-registers.o: registers.c registers.h suspend.h symbols.h
-	$(CC) -c -gstabs -o registers.o registers.c
 
 disassembler.o: disassembler.c disassembler.h suspend.h stabs.h gui.h freemem.h
 	$(CC) -c -gstabs -o disassembler.o disassembler.c
@@ -72,11 +66,26 @@ arexxport.o: arexxport.c arexxport.h suspend.h breakpoints.h gui.h
 arexxconsole.o: arexxconsole.c arexxconsole.h
 	$(CC) -c -gstabs -o arexxconsole.o arexxconsole.c
 
+console.o: console.c console.h freemem.h
+	$(CC) -c -gstabs -o console.o console.c
 
-../db101: suspend.o symbols.o gui.o hexview.o \
-			stabs.o variables.o registers.o \
-			disassembler.o main.o breakpoints.o stacktrace.o globals.o attach.o breakpointswindow.o \
-			freemem.o arexxport.o arexxconsole.o
-	$(CC) -gstabs main.o suspend.o symbols.o gui.o hexview.o stabs.o variables.o globals.o \
-			registers.o disassembler.o breakpoints.o stacktrace.o attach.o \
-			breakpointswindow.o freemem.o arexxport.o arexxconsole.o -lauto -o ../db101
+source.o: source.c source.h freemem.h
+	$(CC) -c -gstabs -o source.o source.c
+
+pipe.o: pipe.c pipe.h
+	$(CC) -c -gstabs -o pipe.o pipe.c
+
+async.o: async.c async.h
+	$(CC) -c -gstabs -o async.o async.c
+
+__unix_to_amiga_path_name.o: __unix_to_amiga_path_name.c unix.h
+	$(CC) -c -gstabs -o __unix_to_amiga_path_name.o __unix_to_amiga_path_name.c
+
+../db101: suspend.o symbols.o gui.o hexview.o console.o source.o \
+			stabs.o variables.o pipe.o async.o \
+			disassembler.o main.o breakpoints.o stacktrace.o attach.o breakpointswindow.o \
+			freemem.o arexxport.o arexxconsole.o __unix_to_amiga_path_name.o
+	$(CC) -gstabs main.o suspend.o symbols.o gui.o hexview.o stabs.o variables.o \
+			disassembler.o breakpoints.o stacktrace.o attach.o async.o \
+			breakpointswindow.o freemem.o arexxport.o arexxconsole.o console.o source.o pipe.o \
+			__unix_to_amiga_path_name.o   -lauto -o ../db101

@@ -55,7 +55,8 @@ struct List hexlist;
 char *sectionlist[1024] = { NULL };
 uint32 hex_numsections;
 
-struct List hex_freelist;
+//struct List hex_freelist;
+int hex_freemem_hook = -1;
 
 struct TextAttr courier_font =
 {
@@ -105,7 +106,7 @@ void hex_init_section_list ()
 		if (header)
 		{
 			name = &strtable[header->sh_name];
-			sectionlist[i] = strdup(name);
+			sectionlist[i] = freemem_strdup(hex_freemem_hook, name);
 		}
 	}
 	sectionlist[i] = NULL;
@@ -119,7 +120,7 @@ void hex_free_section_list ()
 	for (i = 0; i < hex_numsections; i++)
 		if (sectionlist[i])
 		{
-			free (sectionlist[i]);
+			//free (sectionlist[i]); //we will do this when window closes
 			sectionlist[i] = NULL;
 		}
 }
@@ -146,13 +147,13 @@ void hex_load_section (int index)
 //printf("section = 0x%8x\n", section);
 //printf("size = %d\n", size);
 
-
+	IIntuition->SetAttrs(HexListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IListBrowser->FreeListBrowserList(&hexlist);
 	IExec->NewList (&hexlist);
 
 	for (i = 0; i < size; i += 16, dptr += 4)
 	{
-		string = IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
-		add_freelist (&hex_freelist, 1024, string);
+		string = freemem_malloc(hex_freemem_hook, 1024);
 
 		if (i - size < 16)
 		{
@@ -183,12 +184,15 @@ void hex_load_section (int index)
 							            IExec->AddTail(&hexlist, node);
 									}
 	}
+	IIntuition->SetGadgetAttrs((struct Gadget *)HexListBrowserObj, hexwin, NULL,
+												LISTBROWSER_Labels, &hexlist,
+												TAG_END);
 	close_elfhandle(exec_elfhandle);
 }
 
 void hex_free_section()
 {
-	freelist(&hex_freelist);
+	//freelist(&hex_freelist);
 }
 
 
@@ -200,10 +204,10 @@ void hex_open_window()
 	if (!task_exists)
 		return;
 
-	IExec->NewList (&hex_freelist);
+	IExec->NewList (&hexlist);
+	hex_freemem_hook = freemem_alloc_hook();
 
 	hex_init_section_list ();
-	hex_load_section (0);
 
     /* Create the window object. */
     if(( HexWinObj = WindowObject,
@@ -258,8 +262,12 @@ void hex_open_window()
         EndWindow))
     {
         /*  Open the window. */
-        if( hexwin = (struct Window *) RA_OpenWindow(HexWinObj) )
+        if( hexwin = (struct Window *) RA_OpenWindow(HexWinObj))
+        {
         	hex_window_is_open = TRUE;
+        	hex_load_section (0);
+		}
+        	
 	}
 	return;
 }
@@ -297,7 +305,7 @@ void hex_event_handler()
 								case HEX_CHOOSER:
 
 									IIntuition->GetAttrs( HexChooserObj, CHOOSER_Selected, &selected, TAG_DONE );
-									hex_free_section();
+									//hex_free_section();
 									hex_load_section (selected);
 									IIntuition->RefreshGadgets ((struct Gadget *)HexListBrowserObj, hexwin, NULL);
 
@@ -324,16 +332,14 @@ void hex_close_window()
 {
 	if (hex_window_is_open)
 	{
-		hex_free_section();
-        hex_free_section_list();
-
-
         /* Disposing of the window object will
          * also close the window if it is
          * already opened and it will dispose of
          * all objects attached to it.
          */
         IIntuition->DisposeObject( HexWinObj );
+		IListBrowser->FreeListBrowserList(&hexlist);
+		freemem_free_hook(hex_freemem_hook);
 
 		hex_window_is_open = FALSE;
     }

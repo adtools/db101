@@ -70,10 +70,10 @@ void disassembler_show_selected()
 {
 	if (disassembler_window_is_open && disassembler_selected >= 0)
 	{
-		int32 top = MAX(disassembler_selected - 3, 0);
+		//int32 top = MAX(disassembler_selected - 3, 0);
 		IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, disassemblerwin, NULL,
 												LISTBROWSER_Selected, disassembler_selected,
-												LISTBROWSER_Top, top,
+												LISTBROWSER_MakeVisible, disassembler_selected,
 												TAG_DONE);
 	}
 }
@@ -83,23 +83,37 @@ void disassembler_makelist()
 	if (!disassembler_window_is_open)
 		return;
 
-	if (has_disassembler_list)
+	if (has_disassembler_list)	
 		freelist (&asm_freelist);
 
 	struct Node *node;
 	IExec->NewList (&assemblelist);
 	int i;
-	APTR address = (APTR) current_function->address;
-	
+	APTR address,baseaddr;
+	int max;
+	if(hasfunctioncontext)
+	{
+		address = (APTR) current_function->address;
+		max = 1024;
+		baseaddr = address;
+	}
+	else
+	{
+		address = (APTR)context_copy.ip - 5*4;
+		//printf("context_copy.ip = 0x%08x\n", context_copy.ip);
+		max = 10;
+		baseaddr = address;
+	}
+
 	IIntuition->SetAttrs(DisassemblerListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
-	for (i = 0; i < 1024; i++)
+	for (i = 0; i < max; i++)
 	{
 		char *str = IExec->AllocMem (50, MEMF_ANY|MEMF_CLEAR);
 		add_freelist (&asm_freelist, 50, str);
 
 		APTR newaddress = IDebug->DisassembleNative (address, opcodelist[i], operandlist[i]);
 
-		sprintf(str, "0x%x (0x%x): %s %s", address, address-current_function->address, opcodelist[i], operandlist[i]);
+		sprintf(str, "0x%08x (0x%08x): %s %s", address, address-baseaddr, opcodelist[i], operandlist[i]);
 
 		if (node = IListBrowser->AllocListBrowserNode(2,
             									LBNA_Column, 0,
@@ -113,14 +127,14 @@ void disassembler_makelist()
 
 		address = newaddress;
 
-		if ((uint32) (address - current_function->address) >= current_function->size)
-			break;
+		if (hasfunctioncontext)
+			if ((uint32) (address - current_function->address) >= current_function->size)
+				break;
 	}
-	if (disassembler_window_is_open)
-	{
-		IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &assemblelist, TAG_END);
-		disassembler_show_selected();
-	}
+	IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, disassemblerwin, NULL,
+												LISTBROWSER_Labels, &assemblelist,
+												TAG_END);
+	disassembler_show_selected();
 }
 
 void disassembler_freelist()
@@ -137,16 +151,19 @@ void disassembler_open_window()
 	if (disassembler_window_is_open)
 		return;
 
-	if(!hasfunctioncontext)
-		return;
-
 	IExec->NewList (&asm_freelist);
 	IExec->NewList (&assemblelist);
+
+	char *fname;
+	if (hasfunctioncontext)
+		fname = current_function->name;
+	else
+		fname = "Unknown function";
 
     /* Create the window object. */
     if(( DisassemblerWinObj = WindowObject,
             WA_ScreenTitle, "Debug 101",
-            WA_Title, current_function->name,
+            WA_Title, fname,
             WA_Width, 400,
 			WA_Height, 400,
             WA_DepthGadget, TRUE,
@@ -238,13 +255,16 @@ void disassembler_event_handler()
                             switch(result & WMHI_GADGETMASK)
                             {
                                 case DISASSEMBLER_STEP_BUTTON:
-
 									asmstep();
+									//if(!hasfunctioncontext)
+									//	disassembler_makelist();
                                     break;
 
 								case DISASSEMBLER_SKIP_BUTTON:
 
 									asmskip();
+									//if(!hasfunctioncontext)
+									//	disassembler_makelist();
 									break;
 
 								case DISASSEMBLER_LISTBROWSER:

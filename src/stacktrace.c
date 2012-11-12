@@ -15,7 +15,6 @@
 #include <proto/asl.h>
 #include <proto/elf.h>
 
-
 #include <classes/window.h>
 #include <gadgets/button.h>
 #include <gadgets/listbrowser.h>
@@ -40,40 +39,45 @@
 #include "stacktrace.h"
 #include "freemem.h"
 
-enum
-{
-	STACKTRACE_BUTTON = 1,
-	STACKTRACE_LISTBROWSER
-};
 
+Object *StacktraceListBrowserObj;
+struct List stacktrace_list;
 
-Object *StacktraceWinObj, *StacktraceButtonObj, *StacktraceListBrowserObj;
-struct Window *stacktracewin;
-BOOL stacktrace_window_is_open = FALSE;
-
-struct List stacktracelist;
+extern struct Window *mainwin;
 
 extern struct DebugIFace *IDebug;
 
 #define MAX(a, b)  (a>b?a:b)
 
-struct List stack_freelist;
-BOOL has_stack_freelist = FALSE;
+int stacktrace_freemem_hook = -1;
 
+void stacktrace_init()
+{
+	IExec->NewList(&stacktrace_list);
+	stacktrace_freemem_hook = freemem_alloc_hook();
+}
+
+void stacktrace_cleanup()
+{
+	IListBrowser->FreeListBrowserList(&stacktrace_list);
+	freemem_free_hook(stacktrace_freemem_hook);
+}
+
+void stacktrace_clear()
+{
+	IListBrowser->FreeListBrowserList(&stacktrace_list);	
+	freemem_clear(stacktrace_freemem_hook);
+	IIntuition->RefreshGadgets ((struct Gadget *)StacktraceListBrowserObj, mainwin, NULL);
+}
 
 void stacktrace_update()
 {
-	if (!stacktrace_window_is_open)
-		return;
-
 	if (!task_exists)
 		return;
 
-	if (has_stack_freelist)
-		stacktrace_freelist();
-
-	IExec->NewList (&stacktracelist);
-
+	stacktrace_clear();
+	IExec->NewList(&stacktrace_list);
+	
 	struct Task *t = (struct Task *)process;
 	struct Node *node;
 	uint32 stacksize = process->pr_StackSize;
@@ -82,12 +86,12 @@ void stacktrace_update()
 
 	uint32 p = stackpointer;
 
+	IIntuition->SetAttrs(StacktraceListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
 	int i = 0;
 	while (p < stackupper-28)
 	{
 		i++;
-		char *str = (char*)IExec->AllocMem (1024, MEMF_ANY|MEMF_CLEAR);
-		add_freelist(&stack_freelist, 1024, str);
+		char *str = (char*) freemem_malloc(stacktrace_freemem_hook, 1024);
 
 		//first try the stabs functions:
 		struct stab_function *f = stabs_get_function_from_address (*(uint32*)(p+4));
@@ -114,152 +118,9 @@ void stacktrace_update()
                 								LBNCA_Text, str,
             									TAG_DONE))
         							{
-							            IExec->AddTail(&stacktracelist, node);
+							            IExec->AddTail(&stacktrace_list, node);
 									}
 		p = *(uint32*)p;
 	}
-
-	has_stack_freelist = TRUE;
-
-	if (stacktrace_window_is_open)
-		IIntuition->RefreshGadgets ((struct Gadget *)StacktraceListBrowserObj, stacktracewin, NULL);
+	IIntuition->SetGadgetAttrs((struct Gadget *)StacktraceListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &stacktrace_list, TAG_END);
 }
-
-void stacktrace_freelist()
-{
-	if (has_stack_freelist)
-	{
-		freelist(&stack_freelist);
-		has_stack_freelist = FALSE;
-	}
-}
-
-
-void stacktrace_open_window()
-{
-	if (stacktrace_window_is_open)
-		return;
-
-	IExec->NewList (&stack_freelist);
-	IExec->NewList (&stacktracelist);
-
-	pause();
-
-    /* Create the window object. */
-    if(( StacktraceWinObj = WindowObject,
-            WA_ScreenTitle, "Debug 101",
-            WA_Title, "Stacktrace",
-            WA_Width, 400,
-			WA_Height, 400,
-            WA_DepthGadget, TRUE,
-			WA_SizeGadget, TRUE,
-            WA_DragBar, TRUE,
-            WA_CloseGadget, TRUE,
-            WA_Activate, TRUE,
-            WINDOW_Position, WPOS_CENTERSCREEN,
-            /* there is no HintInfo array set up here, instead we define the 
-            ** strings directly when each gadget is created (OM_NEW)
-            */
-            WINDOW_GadgetHelp, TRUE,
-            WINDOW_ParentGroup, VLayoutObject,
-                LAYOUT_SpaceOuter, TRUE,
-                LAYOUT_DeferLayout, TRUE,
-
-	            LAYOUT_AddChild, StacktraceListBrowserObj = ListBrowserObject,
-    	            GA_ID,                     STACKTRACE_LISTBROWSER,
-        	        GA_RelVerify,              TRUE,
-            	    GA_TabCycle,               TRUE,
-//					GA_TextAttr,			   &courier_font,
-                	LISTBROWSER_AutoFit,       TRUE,
-                    LISTBROWSER_Labels,        &stacktracelist,
-//                    LISTBROWSER_ColumnInfo,    columninfo,
-              	    LISTBROWSER_ColumnTitles,  TRUE,
-                	LISTBROWSER_ShowSelected,  TRUE,
-                    LISTBROWSER_Striping,      LBS_ROWS,
-				ListBrowserEnd,
-
-				LAYOUT_AddChild, HLayoutObject,
-	                LAYOUT_AddChild, StacktraceButtonObj = ButtonObject,
-    	                GA_ID, STACKTRACE_BUTTON,
-						GA_RelVerify, TRUE,
-            	        GA_Text, "Done",
-                	ButtonEnd,
-                	CHILD_WeightedHeight, 0,
-				EndMember,
-                CHILD_WeightedHeight, 0,
-			EndMember,
-        EndWindow))
-    {
-        /*  Open the window. */
-        if( stacktracewin = (struct Window *) RA_OpenWindow(StacktraceWinObj) )
-		{
-        	stacktrace_window_is_open = TRUE;
-			stacktrace_update();
-		}
-	}
-}
-
-uint32 stacktrace_obtain_window_signal()
-{
-	uint32 signal = 0x0;
-	if (stacktrace_window_is_open)
-		IIntuition->GetAttr( WINDOW_SigMask, StacktraceWinObj, &signal );
-
-	return signal;
-}
-
-
-void stacktrace_event_handler()
-{
-
-            ULONG wait, signal, result, done = FALSE;
-            WORD Code;
-            CONST_STRPTR hintinfo;
-			uint32 selected;
-            
-            /* Obtain the window wait signal mask. */
-            //IIntuition->GetAttr( WINDOW_SigMask, WinObj, &signal );
-            
-            /* Input Event Loop */
-                while ((result = RA_HandleInput(StacktraceWinObj, &Code)) != WMHI_LASTMSG)
-                {
-                    switch (result & WMHI_CLASSMASK)
-                    {
-                        case WMHI_CLOSEWINDOW:
-                            done = TRUE;
-                            break;
-                         case WMHI_GADGETUP:
-                            switch(result & WMHI_GADGETMASK)
-                            {
-                                case STACKTRACE_BUTTON:
-
-									done = TRUE;
-                                    break;
-                            }
-                            break;
-                    }
-					if (done)
-					{
-						stacktrace_close_window();
-						break;
-					}
-                }
-}
-
-void stacktrace_close_window()
-{
-	if (stacktrace_window_is_open)
-	{
-        /* Disposing of the window object will
-         * also close the window if it is
-         * already opened and it will dispose of
-         * all objects attached to it.
-         */
-        IIntuition->DisposeObject( StacktraceWinObj );
-
-		stacktrace_window_is_open = FALSE;
-    }
-    
-    return;
-}
-

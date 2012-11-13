@@ -93,12 +93,9 @@ uint32 get_pointer_value(struct stab_symbol *s)
     case L_STACK:
         {
         uint32 stackp = (uint32)process->pr_Task.tc_SPReg;
-        uint32 tmpaddr = stackp + s->offset;
+        uint32 addr = stackp + s->offset;
 
-        uint32 buffer = *(uint32*)tmpaddr;
-        //uint32 addr = (uint32)&buffer;
-        //return *(uint32 *)addr;
-        return buffer;
+        return *(uint32 *)addr;
         }
 
     case L_ABSOLUTE:
@@ -106,6 +103,11 @@ uint32 get_pointer_value(struct stab_symbol *s)
         uint32 addr = s->address;
 		return *(uint32 *)addr;
         }
+	case L_POINTER:
+		{
+		uint32 addr = get_pointer_value(s->pointer) + s->offset;
+		return addr;
+		}
 //    case L_REGISTER:
 
     default:
@@ -115,53 +117,30 @@ uint32 get_pointer_value(struct stab_symbol *s)
     return -1;
 }
 
-uint32 get_struct_address(struct stab_symbol *s)
-{
-	switch (s->location)
-    {
-    case L_STACK:
-        {
-        uint32 stackp = (uint32)process->pr_Task.tc_SPReg;
-        uint32 addr = stackp + s->offset;
-
-        return addr;
-        }
-
-    case L_ABSOLUTE:
-        {
-        uint32 addr = s->address;
-		return addr;
-        }
-    }
-    return -1;
-}
-
-
 char *print_variable_value(struct stab_symbol *s)
 {
     char *ret = freemem_malloc(locals_freemem_hook, 256);
-
-    uint32 buffer = 0x0;
-    uint32 addr = 0x0;
+    uint32 *addr = 0x0;
 
     switch (s->location)
     {
     case L_STACK:
         {
         uint32 stackp = (uint32)process->pr_Task.tc_SPReg;
-        uint32 tmpaddr = stackp + s->offset;
-
-        buffer = *(uint32*)tmpaddr;
-        addr = (uint32)&buffer;
+	    addr = (uint32 *)(stackp + s->offset);
         break;
         }
 
     case L_ABSOLUTE:
         {
-        addr = s->address;
+        addr = (uint32 *)s->address;
         break;
         }
-
+	case L_POINTER:
+		{
+		addr = (uint32 *)get_pointer_value(s);
+		break;
+		}
     default:
         printf( "Not a known variable type" );
         break;
@@ -176,7 +155,7 @@ char *print_variable_value(struct stab_symbol *s)
         {
         case T_POINTER:
             {
-            sprintf( ret, "(*) 0x%x", *(uint32*)addr);
+			sprintf( ret, "(*) 0x%x", *addr);
             }
             break;
             
@@ -199,7 +178,7 @@ char *print_variable_value(struct stab_symbol *s)
 			{
 				if(value32 == e->value)
 				{
-					sprintf(ret, "%s (%d)\n", e->name, value32);
+					sprintf(ret, "%s (%d)", e->name, value32);
 					return ret;
 				}
 				if(e == (struct stab_enum_element *)IExec->GetTail(&(enu->list)))
@@ -209,7 +188,12 @@ char *print_variable_value(struct stab_symbol *s)
 			sprintf(ret, "<unknown> (%d)", value32);
 			}
 			break;
-					
+		case T_STRUCT:
+			sprintf(ret, "(struct)");
+			break;
+		case T_UNION:
+			sprintf(ret, "(union)");
+			break;
 		case T_32:
             {
             int32 value32 = *(int32*)addr;
@@ -219,8 +203,8 @@ char *print_variable_value(struct stab_symbol *s)
 
         case T_U32:
             {
-            uint32 valueu32 = *(uint32*)addr;
-            sprintf(ret, "%u", valueu32);
+            uint32 valueu32 = *addr;
+            sprintf(ret, "0x%x", valueu32);
             }
             break;
 
@@ -282,7 +266,6 @@ char *print_variable_value(struct stab_symbol *s)
     return ret;
 }
 
-
 struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32 gen, int hidden)
 {
 	uint32 hidflag = (hidden ? LBFLG_HIDDEN : 0);
@@ -339,16 +322,11 @@ struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32
 	        IUtility->SNPrintf(buf, sizeof(buf), "%s", s->name);
 	        
 		    struct variables_userdata *u = freemem_malloc(locals_freemem_hook, sizeof(struct variables_userdata));
-		    struct stab_symbol *news = freemem_malloc(locals_freemem_hook, sizeof(struct stab_symbol));
-		    news->name = " - ";
-		    news->type = s->type->points_to;
-            news->location = L_ABSOLUTE;
-            news->address = get_pointer_value(s);
-			char *str = print_variable_value(s);
-            u->s = news;
+            u->s = s;
             u->haschildren = 1;
             u->isopen = 0;
-
+            
+			char *str = print_variable_value(s);
 	        if (node = IListBrowser->AllocListBrowserNode(2,
 		        								LBNA_Generation, gen+1,
 		        								LBNA_Flags, LBFLG_HASCHILDREN|hidflag,
@@ -398,9 +376,7 @@ struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32
 	            else
 	              	IExec->AddTail(&variable_list, node);
             }
-
-			uint32 address = get_struct_address(s);
-			
+	
 			struct stab_structure *stru = s->type->struct_ptr;
 			if(s->type->points_to)
 				stru = s->type->points_to->struct_ptr;
@@ -413,8 +389,22 @@ struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32
 		    	struct stab_symbol *news = freemem_malloc(locals_freemem_hook, sizeof(struct stab_symbol));
 		    	news->name = e->name;
 		    	news->type = e->type;
-		        news->location = L_ABSOLUTE;
-        	    news->address = address + (e->bitoffset >> 3);
+		    	switch(s->location)
+		    	{
+		    		case L_ABSOLUTE:
+		    			news->location = L_ABSOLUTE;
+		    			news->address = s->address + (e->bitoffset >> 3);
+		    			break;
+		    		case L_STACK:
+				        news->location = L_STACK;
+        				news->offset = s->offset + (e->bitoffset >> 3);
+        				break;
+        			case L_POINTER:
+        				news->location = L_POINTER;
+        				news->offset = (e->bitoffset >> 3);
+        				news->pointer = s->pointer;
+        				break;
+        		}
 
 		    	node = variables_add_children(node, news, gen+1, TRUE);
 				
@@ -430,6 +420,17 @@ struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32
 			break;
 	}
 	return node;
+}
+
+struct Node *variables_add_pointer_children(struct Node *n, struct stab_symbol *s, int32 gen, int hidden)
+{
+    struct stab_symbol *news = freemem_malloc(locals_freemem_hook, sizeof(struct stab_symbol));
+    news->name = " - ";
+    news->type = s->type->points_to;
+	news->location = L_POINTER;
+	news->pointer = s;
+	news->offset = 0;
+	return variables_add_children(n, news, gen, hidden);
 }
 
 void locals_populate_list(struct Node *node)
@@ -670,7 +671,7 @@ void update_variables()
 												LBNA_UserData, &u,
 												LBNA_Flags, &flags,
 												TAG_END);
-			if(u && u->s && !u->haschildren)
+			if(u && u->s /*&& !u->haschildren*/)
 			{
 				char *str = print_variable_value(u->s);
 				IListBrowser->SetListBrowserNodeAttrs(n,
@@ -729,7 +730,10 @@ void locals_handle_input()
 		if(u && u->haschildren && !u->isopen)
 		{
 			IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
-			variables_add_children(n, u->s, gen, FALSE);
+			if(u->s->type->type == T_POINTER)
+				variables_add_pointer_children(n, u->s, gen, FALSE);
+			else
+				variables_add_children(n, u->s, gen, FALSE);
 			u->isopen = 1;
 			IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
 		}

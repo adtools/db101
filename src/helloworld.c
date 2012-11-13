@@ -48,20 +48,19 @@ int hello(int a)
 
 int main()
 {
-	int a, b=17;
-	char *charptr = "\n";
+	int a=0, b=17;
+	unsigned int c = 12345;
+	char *charptr = "c";
+	printf("charptr = 0x%x\n", &charptr);
 	float hellofloat = 0.3;
 	double dfloat = 0.0001;
 	unsigned short iamshort = 3;
 	void *q;
 	struct hellostruct s = { 1234, 5 };
+	printf("struct addr: 0x%x\n", &s);
 	struct hellostruct *structptr = &s;
 	enum helloenum e = TWO;
-	register int regint;
 
-	for(regint=0; regint < 10; regint++)
-		printf("regint = %d\n", regint);
-	
 //	sleep (2);
 
 	printf("Hello world!\n");

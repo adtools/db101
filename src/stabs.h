@@ -40,6 +40,7 @@ struct stab_symbol
 		uint32 reg;
 		uint32 offset;
 	};
+	struct stab_symbol *pointer;
 };
 
 
@@ -47,7 +48,8 @@ enum __stab_location
 {
 	L_REGISTER,
 	L_STACK,
-	L_ABSOLUTE
+	L_ABSOLUTE,
+	L_POINTER
 };
 
 typedef enum __stab_symbol_types

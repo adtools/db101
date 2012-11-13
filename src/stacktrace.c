@@ -111,7 +111,7 @@ void stacktrace_update()
 		if (!fname)
 			fname = "<unknown function>";
 
-		sprintf(str, "0x%x (%d): %s", p-stackpointer, i, fname);
+		sprintf(str, "0x%x 0x%x (%d): %s", p, p-stackpointer, i, fname);
 
 		if (node = IListBrowser->AllocListBrowserNode(2,
             									LBNA_Column, 0,

@@ -232,26 +232,29 @@ hello:
 .Lscope2:
 	.section	.rodata
 	.align 2
-	.type	C.0.2396, @object
-	.size	C.0.2396, 8
-C.0.2396:
+	.type	C.0.2393, @object
+	.size	C.0.2393, 8
+C.0.2393:
 	.long	1234
 	.short	5
 	.zero	2
 	.align 2
 .LC1:
-	.string	"\n"
+	.string	"c"
 	.align 2
-.LC4:
-	.string	"regint = %d\n"
+.LC2:
+	.string	"charptr = 0x%x\n"
 	.align 2
 .LC5:
-	.string	"Hello world!"
+	.string	"struct addr: 0x%x\n"
 	.align 2
 .LC6:
-	.string	"a = %d\n"
+	.string	"Hello world!"
 	.align 2
 .LC7:
+	.string	"a = %d\n"
+	.align 2
+.LC8:
 	.string	"Goodbye world!"
 	.section	".text"
 	.align 2
@@ -269,110 +272,110 @@ main:
 	mr %r31,%r1
 	.stabn	68,0,51,.LM10-.LFBB3
 .LM10:
+	li %r0,0
+	stw %r0,44(%r31)
 	li %r0,17
 	stw %r0,40(%r31)
 	.stabn	68,0,52,.LM11-.LFBB3
 .LM11:
-	lis %r9,.LC1@ha
-	la %r0,.LC1@l(%r9)
+	li %r0,12345
 	stw %r0,36(%r31)
 	.stabn	68,0,53,.LM12-.LFBB3
 .LM12:
-	lis %r9,.LC2@ha
-	lfs %f0,.LC2@l(%r9)
-	stfs %f0,32(%r31)
+	lis %r9,.LC1@ha
+	la %r0,.LC1@l(%r9)
+	stw %r0,48(%r31)
 	.stabn	68,0,54,.LM13-.LFBB3
 .LM13:
-	lis %r9,.LC3@ha
-	lfd %f0,.LC3@l(%r9)
-	stfd %f0,24(%r31)
-	.stabn	68,0,55,.LM14-.LFBB3
-.LM14:
-	li %r0,3
-	sth %r0,20(%r31)
-	.stabn	68,0,57,.LM15-.LFBB3
-.LM15:
-	lis %r9,C.0.2396@ha
-	la %r9,C.0.2396@l(%r9)
-	lwz %r0,0(%r9)
-	stw %r0,48(%r31)
-	lwz %r0,4(%r9)
-	stw %r0,52(%r31)
-	.stabn	68,0,58,.LM16-.LFBB3
-.LM16:
 	addi %r0,%r31,48
-	stw %r0,12(%r31)
-	.stabn	68,0,59,.LM17-.LFBB3
-.LM17:
-	li %r0,2
-	stw %r0,8(%r31)
-	.stabn	68,0,62,.LM18-.LFBB3
-.LM18:
-	li %r9,0
-	stw %r9,56(%r31)
-	b .L6
-.L7:
-	.stabn	68,0,63,.LM19-.LFBB3
-.LM19:
-	lis %r9,.LC4@ha
-	la %r3,.LC4@l(%r9)
-	lwz %r4,56(%r31)
+	lis %r9,.LC2@ha
+	la %r3,.LC2@l(%r9)
+	mr %r4,%r0
 	crxor 6,6,6
 	bl printf
-	.stabn	68,0,62,.LM20-.LFBB3
-.LM20:
-	lwz %r9,56(%r31)
-	addi %r9,%r9,1
-	stw %r9,56(%r31)
-.L6:
-	lwz %r9,56(%r31)
-	cmpwi %cr7,%r9,9
-	ble %cr7,.L7
-	.stabn	68,0,67,.LM21-.LFBB3
-.LM21:
+	.stabn	68,0,55,.LM14-.LFBB3
+.LM14:
+	lis %r9,.LC3@ha
+	lfs %f0,.LC3@l(%r9)
+	stfs %f0,32(%r31)
+	.stabn	68,0,56,.LM15-.LFBB3
+.LM15:
+	lis %r9,.LC4@ha
+	lfd %f0,.LC4@l(%r9)
+	stfd %f0,24(%r31)
+	.stabn	68,0,57,.LM16-.LFBB3
+.LM16:
+	li %r0,3
+	sth %r0,20(%r31)
+	.stabn	68,0,59,.LM17-.LFBB3
+.LM17:
+	lis %r9,C.0.2393@ha
+	la %r9,C.0.2393@l(%r9)
+	lwz %r0,0(%r9)
+	stw %r0,52(%r31)
+	lwz %r0,4(%r9)
+	stw %r0,56(%r31)
+	.stabn	68,0,60,.LM18-.LFBB3
+.LM18:
+	addi %r0,%r31,52
 	lis %r9,.LC5@ha
 	la %r3,.LC5@l(%r9)
+	mr %r4,%r0
+	crxor 6,6,6
+	bl printf
+	.stabn	68,0,61,.LM19-.LFBB3
+.LM19:
+	addi %r0,%r31,52
+	stw %r0,12(%r31)
+	.stabn	68,0,62,.LM20-.LFBB3
+.LM20:
+	li %r0,2
+	stw %r0,8(%r31)
+	.stabn	68,0,66,.LM21-.LFBB3
+.LM21:
+	lis %r9,.LC6@ha
+	la %r3,.LC6@l(%r9)
 	bl puts
-	.stabn	68,0,69,.LM22-.LFBB3
+	.stabn	68,0,68,.LM22-.LFBB3
 .LM22:
 	li %r3,5
 	bl hello
 	mr %r0,%r3
 	stw %r0,44(%r31)
-	.stabn	68,0,71,.LM23-.LFBB3
+	.stabn	68,0,70,.LM23-.LFBB3
 .LM23:
 	lis %r9,globalvariable@ha
 	li %r0,4321
 	stw %r0,globalvariable@l(%r9)
-	.stabn	68,0,73,.LM24-.LFBB3
+	.stabn	68,0,72,.LM24-.LFBB3
 .LM24:
-	b .L9
-.L10:
-	.stabn	68,0,75,.LM25-.LFBB3
+	b .L6
+.L7:
+	.stabn	68,0,74,.LM25-.LFBB3
 .LM25:
-	lis %r9,.LC6@ha
-	la %r3,.LC6@l(%r9)
+	lis %r9,.LC7@ha
+	la %r3,.LC7@l(%r9)
 	lwz %r4,44(%r31)
 	crxor 6,6,6
 	bl printf
-	.stabn	68,0,73,.LM26-.LFBB3
+	.stabn	68,0,72,.LM26-.LFBB3
 .LM26:
 	lwz %r9,44(%r31)
 	addi %r0,%r9,1
 	stw %r0,44(%r31)
-.L9:
+.L6:
 	lwz %r0,44(%r31)
 	cmpwi %cr7,%r0,14
-	ble %cr7,.L10
-	.stabn	68,0,80,.LM27-.LFBB3
+	ble %cr7,.L7
+	.stabn	68,0,79,.LM27-.LFBB3
 .LM27:
-	lis %r9,.LC7@ha
-	la %r3,.LC7@l(%r9)
+	lis %r9,.LC8@ha
+	la %r3,.LC8@l(%r9)
 	bl puts
-	.stabn	68,0,82,.LM28-.LFBB3
+	.stabn	68,0,81,.LM28-.LFBB3
 .LM28:
 	li %r0,0
-	.stabn	68,0,83,.LM29-.LFBB3
+	.stabn	68,0,82,.LM29-.LFBB3
 .LM29:
 	mr %r3,%r0
 	lwz %r11,0(%r1)
@@ -384,25 +387,25 @@ main:
 	.size	main, .-main
 	.stabs	"a:(0,1)",128,0,0,44
 	.stabs	"b:(0,1)",128,0,0,40
-	.stabs	"charptr:(14,11)",128,0,0,36
+	.stabs	"c:(0,4)",128,0,0,36
+	.stabs	"charptr:(14,11)",128,0,0,48
 	.stabs	"hellofloat:(0,12)",128,0,0,32
 	.stabs	"dfloat:(0,13)",128,0,0,24
 	.stabs	"iamshort:(0,9)",128,0,0,20
 	.stabs	"q:(7,11)",128,0,0,16
-	.stabs	"s:(0,20)",128,0,0,48
+	.stabs	"s:(0,20)",128,0,0,52
 	.stabs	"structptr:(0,22)=*(0,20)",128,0,0,12
 	.stabs	"e:(0,21)",128,0,0,8
-	.stabs	"regint:(0,1)",128,0,0,56
 	.stabn	192,0,0,.LFBB3-.LFBB3
 	.stabn	224,0,0,.Lscope3-.LFBB3
 .Lscope3:
 	.stabs	"globalvariable:G(0,1)",32,0,0,0
 	.section	.rodata
 	.align 2
-.LC2:
+.LC3:
 	.long	1050253722
 	.align 3
-.LC3:
+.LC4:
 	.long	1058682594
 	.long	-350469331
 	.section	".text"

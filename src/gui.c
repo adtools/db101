@@ -110,12 +110,11 @@ char *request_file (struct Window *win, char **path)
 	char *ret;
 	if (!req)
 	{
-		printf("Couldn't allocate requester!\n");	
+		console_printf(OUTPUT_WARNING, "Couldn't allocate requester!\n");	
 		return NULL;
 	}
 	if (!(IAsl->AslRequest (req, NULL)))
 	{
-		printf("User aborted!\n");
 		return NULL;
 	}
 

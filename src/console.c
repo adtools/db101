@@ -29,6 +29,7 @@ uint32 console_colors[OUTPUT_NO_TYPES] =
 	0xffff0000,
 	0xff0000ff,
 	0xff00ff00,
+	0xffffff00
 };
 
 void console_init()

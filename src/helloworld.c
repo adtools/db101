@@ -48,6 +48,7 @@ int hello(int a)
 
 int main()
 {
+	setvbuf(stdout, NULL, _IOLBF, 0);
 	int a=0, b=17;
 	unsigned int c = 12345;
 	char *charptr = "c";

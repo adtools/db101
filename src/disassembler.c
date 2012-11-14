@@ -38,28 +38,19 @@
 #include "stabs.h"
 #include "gui.h"
 #include "disassembler.h"
-
-enum
-{
-	DISASSEMBLER_STEP_BUTTON = 1,
-	DISASSEMBLER_SKIP_BUTTON,
-	DISASSEMBLER_LISTBROWSER
-};
+#include "freemem.h"
 
 
 Object *DisassemblerWinObj, *DisassemblerStepButtonObj, *DisassemblerSkipButtonObj, *DisassemblerListBrowserObj;
-struct Window *disassemblerwin;
-BOOL disassembler_window_is_open = FALSE;
+extern struct Window *mainwin;
 
 int32 disassembler_selected = 0;
 
-struct List assemblelist;
-BOOL has_disassembler_list = FALSE;
-struct List asm_freelist;
+struct List disassembly_list;
 
 int noinstructions = 0;
-char opcodelist[1024][15];
-char operandlist[1024][40];
+char opcodestr[15];
+char operandstr[40];
 
 extern struct stab_function *current_function;
 extern struct DebugIFace *IDebug;
@@ -68,10 +59,10 @@ extern struct DebugIFace *IDebug;
 
 void disassembler_show_selected()
 {
-	if (disassembler_window_is_open && disassembler_selected >= 0)
+	if (disassembler_selected >= 0)
 	{
 		//int32 top = MAX(disassembler_selected - 3, 0);
-		IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, disassemblerwin, NULL,
+		IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, mainwin, NULL,
 												LISTBROWSER_Selected, disassembler_selected,
 												LISTBROWSER_MakeVisible, disassembler_selected,
 												TAG_DONE);
@@ -80,14 +71,10 @@ void disassembler_show_selected()
 
 void disassembler_makelist()
 {
-	if (!disassembler_window_is_open)
-		return;
-
-	if (has_disassembler_list)	
-		freelist (&asm_freelist);
-
+	disassembler_clear();
+	
 	struct Node *node;
-	IExec->NewList (&assemblelist);
+	IExec->NewList (&disassembly_list);
 	int i;
 	APTR address,baseaddr;
 	int max;
@@ -108,19 +95,19 @@ void disassembler_makelist()
 	IIntuition->SetAttrs(DisassemblerListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
 	for (i = 0; i < max; i++)
 	{
-		char *str = IExec->AllocMem (50, MEMF_ANY|MEMF_CLEAR);
-		add_freelist (&asm_freelist, 50, str);
+		char str[50];
 
-		APTR newaddress = IDebug->DisassembleNative (address, opcodelist[i], operandlist[i]);
+		APTR newaddress = IDebug->DisassembleNative (address, opcodestr, operandstr);
 
-		sprintf(str, "0x%08x (0x%08x): %s %s", address, address-baseaddr, opcodelist[i], operandlist[i]);
+		sprintf(str, "0x%08x (0x%08x): %s %s", address, address-baseaddr, opcodestr, operandstr);
 
 		if (node = IListBrowser->AllocListBrowserNode(2,
             									LBNA_Column, 0,
-                								LBNCA_Text, str,
+            										LBNCA_CopyText, TRUE,
+	                								LBNCA_Text, str,
             									TAG_DONE))
         							{
-							            IExec->AddTail(&assemblelist, node);
+							            IExec->AddTail(&disassembly_list, node);
 									}
 		if (address == (APTR)context_copy.ip)
 			disassembler_selected = i;
@@ -131,171 +118,27 @@ void disassembler_makelist()
 			if ((uint32) (address - current_function->address) >= current_function->size)
 				break;
 	}
-	IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, disassemblerwin, NULL,
-												LISTBROWSER_Labels, &assemblelist,
+	IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, mainwin, NULL,
+												LISTBROWSER_Labels, &disassembly_list,
 												TAG_END);
 	disassembler_show_selected();
 }
 
-void disassembler_freelist()
+void disassembler_init()
 {
-	if (has_disassembler_list)
-	{
-		freelist (asm_freelist);
-		has_disassembler_list = FALSE;
-	}
+	IExec->NewList(&disassembly_list);
 }
 
-void disassembler_open_window()
+void disassembler_cleanup()
 {
-	if (disassembler_window_is_open)
-		return;
-
-	IExec->NewList (&asm_freelist);
-	IExec->NewList (&assemblelist);
-
-	char *fname;
-	if (hasfunctioncontext)
-		fname = current_function->name;
-	else
-		fname = "Unknown function";
-
-    /* Create the window object. */
-    if(( DisassemblerWinObj = WindowObject,
-            WA_ScreenTitle, "Debug 101",
-            WA_Title, fname,
-            WA_Width, 400,
-			WA_Height, 400,
-            WA_DepthGadget, TRUE,
-			WA_SizeGadget, TRUE,
-            WA_DragBar, TRUE,
-            WA_CloseGadget, TRUE,
-            WA_Activate, TRUE,
-            WINDOW_Position, WPOS_CENTERSCREEN,
-            /* there is no HintInfo array set up here, instead we define the 
-            ** strings directly when each gadget is created (OM_NEW)
-            */
-            WINDOW_GadgetHelp, TRUE,
-            WINDOW_ParentGroup, VLayoutObject,
-                LAYOUT_SpaceOuter, TRUE,
-                LAYOUT_DeferLayout, TRUE,
-
-	            LAYOUT_AddChild, DisassemblerListBrowserObj = ListBrowserObject,
-    	            GA_ID,                     DISASSEMBLER_LISTBROWSER,
-        	        GA_RelVerify,              TRUE,
-            	    GA_TabCycle,               TRUE,
-//					GA_TextAttr,			   &courier_font,
-                	LISTBROWSER_AutoFit,       TRUE,
-                    LISTBROWSER_Labels,        &assemblelist,
-//                    LISTBROWSER_ColumnInfo,    columninfo,
-              	    LISTBROWSER_ColumnTitles,  TRUE,
-                	LISTBROWSER_ShowSelected,  TRUE,
-                    LISTBROWSER_Striping,      LBS_ROWS,
-				ListBrowserEnd,
-
-				LAYOUT_AddChild, HLayoutObject,
-	                LAYOUT_AddChild, DisassemblerStepButtonObj = ButtonObject,
-    	                GA_ID, DISASSEMBLER_STEP_BUTTON,
-						GA_RelVerify, TRUE,
-            	        GA_Text, "Step",
-                	ButtonEnd,
-                	CHILD_WeightedHeight, 0,
-
-	                LAYOUT_AddChild, DisassemblerSkipButtonObj = ButtonObject,
-    	                GA_ID, DISASSEMBLER_SKIP_BUTTON,
-						GA_RelVerify, TRUE,
-            	        GA_Text, "Skip",
-                	ButtonEnd,
-                	CHILD_WeightedHeight, 0,
-				EndMember,
-                CHILD_WeightedHeight, 0,
-			EndMember,
-        EndWindow))
-    {
-        /*  Open the window. */
-        if( disassemblerwin = (struct Window *) RA_OpenWindow(DisassemblerWinObj) )
-		{
-        	disassembler_window_is_open = TRUE;
-			disassembler_makelist();
-			disassembler_show_selected();
-		}
-	}
+	IListBrowser->FreeListBrowserList(&disassembly_list);
 }
 
-uint32 disassembler_obtain_window_signal()
+void disassembler_clear()
 {
-	uint32 signal = 0x0;
-	if (disassembler_window_is_open)
-		IIntuition->GetAttr( WINDOW_SigMask, DisassemblerWinObj, &signal );
-
-	return signal;
+	IIntuition->SetAttrs(DisassemblerListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IListBrowser->FreeListBrowserList(&disassembly_list);
+	IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, mainwin, NULL,
+												LISTBROWSER_Labels, &disassembly_list,
+												TAG_END);
 }
-
-
-void disassembler_event_handler()
-{
-
-            ULONG wait, signal, result, done = FALSE;
-            WORD Code;
-            CONST_STRPTR hintinfo;
-			uint32 selected;
-            
-            /* Obtain the window wait signal mask. */
-            //IIntuition->GetAttr( WINDOW_SigMask, WinObj, &signal );
-            
-            /* Input Event Loop */
-                while ((result = RA_HandleInput(DisassemblerWinObj, &Code)) != WMHI_LASTMSG)
-                {
-                    switch (result & WMHI_CLASSMASK)
-                    {
-                        case WMHI_CLOSEWINDOW:
-                            done = TRUE;
-                            break;
-                         case WMHI_GADGETUP:
-                            switch(result & WMHI_GADGETMASK)
-                            {
-                                case DISASSEMBLER_STEP_BUTTON:
-									asmstep();
-									//if(!hasfunctioncontext)
-									//	disassembler_makelist();
-                                    break;
-
-								case DISASSEMBLER_SKIP_BUTTON:
-
-									asmskip();
-									//if(!hasfunctioncontext)
-									//	disassembler_makelist();
-									break;
-
-								case DISASSEMBLER_LISTBROWSER:
-
-									disassembler_show_selected();
-									break;
-                            }
-                            break;
-                    }
-					if (done)
-					{
-						disassembler_close_window();
-						break;
-					}
-                }
-}
-
-void disassembler_close_window()
-{
-	if (disassembler_window_is_open)
-	{
-        /* Disposing of the window object will
-         * also close the window if it is
-         * already opened and it will dispose of
-         * all objects attached to it.
-         */
-        IIntuition->DisposeObject( DisassemblerWinObj );
-		IListBrowser->FreeListBrowserList(&assemblelist);
-		disassembler_freelist();
-
-		disassembler_window_is_open = FALSE;
-    }
-}
-

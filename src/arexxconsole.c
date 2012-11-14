@@ -36,21 +36,19 @@
 
 #include "arexxconsole.h"
 
-
+#if 0
 enum
 {
 	AREXX_BUTTON = 1,
 	AREXX_STRING
 };
+#endif
 
-Object *ArexxWinObj, *ArexxSendButtonObj, *ArexxStringObj;
-
-struct Window *arexxwin;
-
-BOOL arexx_window_is_open = FALSE;
-
+extern Object *ArexxSendButtonObj, *ArexxStringObj;
+extern struct Window *mainwin;
 extern Object *arexx_obj;
 
+#if 0
 void arexxconsole_open_window()
 {
 	if (arexx_window_is_open)
@@ -109,7 +107,7 @@ uint32 arexxconsole_obtain_window_signal()
 
 	return signal;
 }
-
+#endif
 
 struct apExecute execute;
 char acommandstring[1024];
@@ -147,7 +145,7 @@ void arexxconsole_event_handler()
                                     IIntuition->SetAttrs( ArexxStringObj, STRINGA_TextVal, "", TAG_DONE );
 									IIntuition->RefreshGadgets ((struct Gadget *)ArexxStringObj, arexxwin, NULL);
 
-									IIntuition->IDoMethodA(arexx_obj, &execute);
+									IIntuition->IDoMethodA(arexx_obj, (struct Msg *)&execute);
 
                                     break;
                             }

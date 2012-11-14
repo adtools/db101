@@ -232,9 +232,9 @@ hello:
 .Lscope2:
 	.section	.rodata
 	.align 2
-	.type	C.0.2393, @object
-	.size	C.0.2393, 8
-C.0.2393:
+	.type	C.0.2395, @object
+	.size	C.0.2395, 8
+C.0.2395:
 	.long	1234
 	.short	5
 	.zero	2
@@ -272,94 +272,104 @@ main:
 	mr %r31,%r1
 	.stabn	68,0,51,.LM10-.LFBB3
 .LM10:
+	bl __getreent
+	mr %r9,%r3
+	lwz %r0,8(%r9)
+	mr %r3,%r0
+	li %r4,0
+	li %r5,1
+	li %r6,0
+	bl setvbuf
+	.stabn	68,0,52,.LM11-.LFBB3
+.LM11:
 	li %r0,0
 	stw %r0,44(%r31)
 	li %r0,17
 	stw %r0,40(%r31)
-	.stabn	68,0,52,.LM11-.LFBB3
-.LM11:
-	li %r0,12345
-	stw %r0,36(%r31)
 	.stabn	68,0,53,.LM12-.LFBB3
 .LM12:
+	li %r0,12345
+	stw %r0,36(%r31)
+	.stabn	68,0,54,.LM13-.LFBB3
+.LM13:
 	lis %r9,.LC1@ha
 	la %r0,.LC1@l(%r9)
 	stw %r0,48(%r31)
-	.stabn	68,0,54,.LM13-.LFBB3
-.LM13:
+	.stabn	68,0,55,.LM14-.LFBB3
+.LM14:
 	addi %r0,%r31,48
 	lis %r9,.LC2@ha
 	la %r3,.LC2@l(%r9)
 	mr %r4,%r0
 	crxor 6,6,6
 	bl printf
-	.stabn	68,0,55,.LM14-.LFBB3
-.LM14:
+	.stabn	68,0,56,.LM15-.LFBB3
+.LM15:
 	lis %r9,.LC3@ha
 	lfs %f0,.LC3@l(%r9)
 	stfs %f0,32(%r31)
-	.stabn	68,0,56,.LM15-.LFBB3
-.LM15:
+	.stabn	68,0,57,.LM16-.LFBB3
+.LM16:
 	lis %r9,.LC4@ha
 	lfd %f0,.LC4@l(%r9)
 	stfd %f0,24(%r31)
-	.stabn	68,0,57,.LM16-.LFBB3
-.LM16:
+	.stabn	68,0,58,.LM17-.LFBB3
+.LM17:
 	li %r0,3
 	sth %r0,20(%r31)
-	.stabn	68,0,59,.LM17-.LFBB3
-.LM17:
-	lis %r9,C.0.2393@ha
-	la %r9,C.0.2393@l(%r9)
+	.stabn	68,0,60,.LM18-.LFBB3
+.LM18:
+	lis %r9,C.0.2395@ha
+	la %r9,C.0.2395@l(%r9)
 	lwz %r0,0(%r9)
 	stw %r0,52(%r31)
 	lwz %r0,4(%r9)
 	stw %r0,56(%r31)
-	.stabn	68,0,60,.LM18-.LFBB3
-.LM18:
+	.stabn	68,0,61,.LM19-.LFBB3
+.LM19:
 	addi %r0,%r31,52
 	lis %r9,.LC5@ha
 	la %r3,.LC5@l(%r9)
 	mr %r4,%r0
 	crxor 6,6,6
 	bl printf
-	.stabn	68,0,61,.LM19-.LFBB3
-.LM19:
-	addi %r0,%r31,52
-	stw %r0,12(%r31)
 	.stabn	68,0,62,.LM20-.LFBB3
 .LM20:
+	addi %r0,%r31,52
+	stw %r0,12(%r31)
+	.stabn	68,0,63,.LM21-.LFBB3
+.LM21:
 	li %r0,2
 	stw %r0,8(%r31)
-	.stabn	68,0,66,.LM21-.LFBB3
-.LM21:
+	.stabn	68,0,67,.LM22-.LFBB3
+.LM22:
 	lis %r9,.LC6@ha
 	la %r3,.LC6@l(%r9)
 	bl puts
-	.stabn	68,0,68,.LM22-.LFBB3
-.LM22:
+	.stabn	68,0,69,.LM23-.LFBB3
+.LM23:
 	li %r3,5
 	bl hello
 	mr %r0,%r3
 	stw %r0,44(%r31)
-	.stabn	68,0,70,.LM23-.LFBB3
-.LM23:
+	.stabn	68,0,71,.LM24-.LFBB3
+.LM24:
 	lis %r9,globalvariable@ha
 	li %r0,4321
 	stw %r0,globalvariable@l(%r9)
-	.stabn	68,0,72,.LM24-.LFBB3
-.LM24:
+	.stabn	68,0,73,.LM25-.LFBB3
+.LM25:
 	b .L6
 .L7:
-	.stabn	68,0,74,.LM25-.LFBB3
-.LM25:
+	.stabn	68,0,75,.LM26-.LFBB3
+.LM26:
 	lis %r9,.LC7@ha
 	la %r3,.LC7@l(%r9)
 	lwz %r4,44(%r31)
 	crxor 6,6,6
 	bl printf
-	.stabn	68,0,72,.LM26-.LFBB3
-.LM26:
+	.stabn	68,0,73,.LM27-.LFBB3
+.LM27:
 	lwz %r9,44(%r31)
 	addi %r0,%r9,1
 	stw %r0,44(%r31)
@@ -367,16 +377,16 @@ main:
 	lwz %r0,44(%r31)
 	cmpwi %cr7,%r0,14
 	ble %cr7,.L7
-	.stabn	68,0,79,.LM27-.LFBB3
-.LM27:
+	.stabn	68,0,80,.LM28-.LFBB3
+.LM28:
 	lis %r9,.LC8@ha
 	la %r3,.LC8@l(%r9)
 	bl puts
-	.stabn	68,0,81,.LM28-.LFBB3
-.LM28:
-	li %r0,0
 	.stabn	68,0,82,.LM29-.LFBB3
 .LM29:
+	li %r0,0
+	.stabn	68,0,83,.LM30-.LFBB3
+.LM30:
 	mr %r3,%r0
 	lwz %r11,0(%r1)
 	lwz %r0,4(%r11)

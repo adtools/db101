@@ -1,7 +1,8 @@
 /* disassembler.h */
 
-void disassembler_open_window(void);
-void disassembler_close_window(void);
-uint32 disassembler_obtain_window_signal(void);
-void disassembler_event_handler(void);
 void disassembler_makelist(void);
+void disassembler_show_selected();
+
+void disassembler_init();
+void disassembler_cleanup();
+void disassembler_clear();

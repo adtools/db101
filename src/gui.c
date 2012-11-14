@@ -12,6 +12,8 @@
 #include <proto/asl.h>
 #include <proto/requester.h>
 #include <proto/space.h>
+#include <proto/clicktab.h>
+#include <proto/arexx.h>
 
 #include <classes/window.h>
 #include <classes/requester.h>
@@ -19,6 +21,8 @@
 #include <gadgets/listbrowser.h>
 #include <images/label.h>
 #include <gadgets/space.h>
+#include <gadgets/clicktab.h>
+#include <classes/arexx.h>
 
 #include <reaction/reaction_macros.h>
 
@@ -58,15 +62,17 @@ enum
 	GAD_KILL_BUTTON,
 	GAD_CRASH_BUTTON,
 	GAD_SETBREAK_BUTTON,
-	GAD_X_BUTTON,
+	GAD_HEX_BUTTON,
 	GAD_VARIABLES_LISTBROWSER,
 	GAD_STACKTRACE_LISTBROWSER,
 	GAD_SOURCE_LISTBROWSER,
+	GAD_DISASSEMBLER_LISTBROWSER,
+	GAD_DISASSEMBLER_STEP_BUTTON,
+	GAD_DISASSEMBLER_SKIP_BUTTON,
 	GAD_CONSOLE_LISTBROWSER,
-	GAD_HEX_BUTTON,
-	GAD_DISASSEMBLE_BUTTON,
-	GAD_STACKTRACE_BUTTON,
+	GAD_AREXX_STRING,
 	GAD_AREXX_BUTTON,
+	GAD_X_BUTTON,
 	GAD_TEXT
 };
 
@@ -74,6 +80,7 @@ extern struct List variable_list;
 extern struct List stacktrace_list;
 extern struct List console_list;
 extern struct List source_list;
+extern struct List disassembly_list;
 
 extern struct ColumnInfo *variablescolumninfo;
 extern struct ColumnInfo *sourcecolumninfo;
@@ -86,8 +93,9 @@ BOOL main_window_is_open = FALSE;
 Object *SelectButtonObj, *ReloadButtonObj, *FilenameStringObj, *AttachButtonObj;
 Object *StartButtonObj, *PauseButtonObj, *StepOverButtonObj, *StepIntoButtonObj, *KillButtonObj, *CrashButtonObj, *SetBreakButtonObj, *XButtonObj;
 Object *HexviewButtonObj, *DisassembleviewButtonObj, *StacktraceButtonObj;
-Object *ArexxButtonObj;
-extern Object *VariablesListBrowserObj, *StacktraceListBrowserObj, *FilesListBrowserObj, *ConsoleListBrowserObj, *SourceListBrowserObj;
+Object *ArexxButtonObj, *ArexxStringObj, *arexx_obj;
+extern Object *VariablesListBrowserObj, *StacktraceListBrowserObj, *DisassemblerListBrowserObj, *ConsoleListBrowserObj, *SourceListBrowserObj;
+extern Object *DisassemblerStepButtonObj, *DisassemblerSkipButtonObj;
 
 char lastdir[1024] = "src"; //"qt:examples/widgets/calculator"; //work:code/medium/StangTennis2D";
 char filename[1024] = "";
@@ -189,10 +197,8 @@ uint32 obtain_all_signals()
 
 	signal |= main_obtain_window_signal();
 	signal |= hex_obtain_window_signal();
-	signal |= disassembler_obtain_window_signal();
 	signal |= breakpoints_obtain_window_signal();
 	signal |= arexx_obtain_signal();
-	signal |= arexxconsole_obtain_window_signal();
 	signal |= pipe_obtain_signal();
 	signal |= debug_sigfield;
 
@@ -202,12 +208,14 @@ uint32 obtain_all_signals()
 void main_open_window()
 {
 	main_freemem_hook = freemem_alloc_hook();
+	STRPTR PageLabels_1[] = {"Source", "Assembly", NULL};
 
 	locals_init();
 	console_init();
 	stacktrace_init();
 	source_init();
-
+	disassembler_init();
+	
 	pipe_init();
 
     /* Create the window object. */
@@ -324,6 +332,15 @@ void main_open_window()
 					LAYOUT_AddChild, SpaceObject,
 						SPACE_MinWidth, 24,
 					SpaceEnd,
+					
+					LAYOUT_AddChild, HexviewButtonObj = ButtonObject,
+						GA_ID, GAD_HEX_BUTTON,
+	                    GA_RelVerify, TRUE,
+						GA_Text, "Hex",
+						GA_Disabled, TRUE,
+					ButtonEnd,
+	                CHILD_WeightedHeight, 0,
+
 				EndMember,
 				CHILD_WeightedHeight, 0,
 
@@ -356,17 +373,58 @@ void main_open_window()
 	                ListBrowserEnd,
 	            EndMember,
 	            
-	            LAYOUT_AddChild, SourceListBrowserObj = ListBrowserObject,
-    	            GA_ID,                     GAD_SOURCE_LISTBROWSER,
-        	        GA_RelVerify,              TRUE,
-            	    GA_TabCycle,               TRUE,
-                	LISTBROWSER_AutoFit,       TRUE,
-                    LISTBROWSER_Labels,        &source_list,
-                    LISTBROWSER_ColumnInfo,    sourcecolumninfo,
-              	    LISTBROWSER_ColumnTitles,  TRUE,
-                	LISTBROWSER_ShowSelected,  TRUE,
-					//LISTBROWSER_Striping,      LBS_ROWS,
-				ListBrowserEnd,
+	            LAYOUT_AddChild, /*(struct Gadget *)*/ClickTabObject,
+	            	GA_Text, PageLabels_1,
+
+	            	CLICKTAB_Current,	0,
+	            	CLICKTAB_PageGroup,	PageObject,
+			    		PAGE_Add, VLayoutObject,
+			    			//LAYOUT_SpaceOuter,	TRUE,
+			    			//LAYOUT_DeferLayout,	TRUE,
+			    			LAYOUT_AddChild, SourceListBrowserObj = ListBrowserObject,
+			    	        	GA_ID,                     GAD_SOURCE_LISTBROWSER,
+	        			    	GA_RelVerify,              TRUE,
+	            				GA_TabCycle,               TRUE,
+	                			LISTBROWSER_AutoFit,       TRUE,
+	                    		LISTBROWSER_Labels,        &source_list,
+	                    		LISTBROWSER_ColumnInfo,    sourcecolumninfo,
+	              	    		LISTBROWSER_ColumnTitles,  TRUE,
+	                			LISTBROWSER_ShowSelected,  TRUE,
+								//LISTBROWSER_Striping,      LBS_ROWS,
+							ListBrowserEnd,
+						EndMember,
+						
+						PAGE_Add, VLayoutObject,
+							LAYOUT_AddChild, DisassemblerListBrowserObj = ListBrowserObject,
+		    	        	    GA_ID,                     GAD_DISASSEMBLER_LISTBROWSER,
+    		    	    	    GA_RelVerify,              TRUE,
+        		    		    GA_TabCycle,               TRUE,
+								//GA_TextAttr,			   &courier_font,
+        	    	    		LISTBROWSER_AutoFit,       TRUE,
+        	    		  	    LISTBROWSER_Labels,        &disassembly_list,
+        	  		    	  	LISTBROWSER_ShowSelected,  TRUE,
+        	        		    LISTBROWSER_Striping,      LBS_ROWS,
+							ListBrowserEnd,
+							
+							LAYOUT_AddChild, HLayoutObject,
+								LAYOUT_AddChild, DisassemblerStepButtonObj = ButtonObject,
+    	            			    GA_ID, GAD_DISASSEMBLER_STEP_BUTTON,
+									GA_RelVerify, TRUE,
+            	    			    GA_Text, "Step",
+            			    	ButtonEnd,
+			                	CHILD_WeightedHeight, 0,
+
+	                			LAYOUT_AddChild, DisassemblerSkipButtonObj = ButtonObject,
+    	            			    GA_ID, GAD_DISASSEMBLER_SKIP_BUTTON,
+									GA_RelVerify, TRUE,
+            	        			GA_Text, "Skip",
+            				   	ButtonEnd,
+			                	CHILD_WeightedHeight, 0,
+							EndMember,
+		                	CHILD_WeightedHeight, 0,
+						EndMember,
+					PageEnd,
+				EndMember,
 				
 				LAYOUT_AddChild, HLayoutObject,
 		            LAYOUT_AddChild, ConsoleListBrowserObj = ListBrowserObject,
@@ -375,9 +433,27 @@ void main_open_window()
             		    GA_TabCycle,               TRUE,
                 		LISTBROWSER_AutoFit,       TRUE,
                 	    LISTBROWSER_Labels,        &console_list,
-                		//LISTBROWSER_ShowSelected,  TRUE,
 					ListBrowserEnd,
+				EndMember,
+				
+				LAYOUT_AddChild, HLayoutObject,
+	                LAYOUT_AddChild, ArexxStringObj = StringObject,
+    	                GA_ID, GAD_AREXX_STRING,
+        	            GA_RelVerify, TRUE,
+						GA_Disabled, FALSE,
+						GA_ReadOnly, FALSE,
+						STRINGA_TextVal, "",
+        	        StringEnd,
 
+					LAYOUT_AddChild, ArexxButtonObj = ButtonObject,
+						GA_ID, GAD_AREXX_BUTTON,
+	                    GA_RelVerify, TRUE,
+						GA_Text, "Send",
+						GA_Disabled, FALSE,
+					ButtonEnd,
+	                CHILD_WeightedHeight, 0,
+	                CHILD_WeightedWidth, 0,
+	                
 					LAYOUT_AddChild, XButtonObj = ButtonObject,
 						GA_ID, GAD_X_BUTTON,
 	                    GA_RelVerify, TRUE,
@@ -386,32 +462,6 @@ void main_open_window()
 					ButtonEnd,
 	                CHILD_WeightedHeight, 0,
 					CHILD_WeightedWidth, 0,
-				EndMember,
-				
-				LAYOUT_AddChild, HLayoutObject,
-					LAYOUT_AddChild, HexviewButtonObj = ButtonObject,
-						GA_ID, GAD_HEX_BUTTON,
-	                    GA_RelVerify, TRUE,
-						GA_Text, "HexView",
-						GA_Disabled, TRUE,
-					ButtonEnd,
-	                CHILD_WeightedHeight, 0,
-
-					LAYOUT_AddChild, DisassembleviewButtonObj = ButtonObject,
-						GA_ID, GAD_DISASSEMBLE_BUTTON,
-	                    GA_RelVerify, TRUE,
-						GA_Text, "Disassemble",
-						GA_Disabled, TRUE,
-					ButtonEnd,
-	                CHILD_WeightedHeight, 0,
-
-					LAYOUT_AddChild, ArexxButtonObj = ButtonObject,
-						GA_ID, GAD_AREXX_BUTTON,
-	                    GA_RelVerify, TRUE,
-						GA_Text, "Console",
-						GA_Disabled, FALSE,
-					ButtonEnd,
-	                CHILD_WeightedHeight, 0,
 				EndMember,
 				CHILD_WeightedHeight, 0,
 
@@ -484,7 +534,7 @@ void event_loop()
 						button_setdisabled (KillButtonObj, FALSE);
 						button_setdisabled (CrashButtonObj, FALSE);
 						button_setdisabled (SelectButtonObj, TRUE);
-						button_setdisabled (DisassembleviewButtonObj, FALSE);
+						//button_setdisabled (DisassembleviewButtonObj, FALSE);
 
 						remove_line_breakpoints();
 
@@ -545,7 +595,7 @@ void event_loop()
 					button_setdisabled (HexviewButtonObj, TRUE);
 					//button_setdisabled (VariablesButtonObj, TRUE);
 					//button_setdisabled (RegisterviewButtonObj, TRUE);
-					button_setdisabled (DisassembleviewButtonObj, TRUE);
+					//button_setdisabled (DisassembleviewButtonObj, TRUE);
 					IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
 
 					free_symbols();
@@ -555,7 +605,7 @@ void event_loop()
 					//globals_close_window();
 					//registers_close_window();
 					hex_close_window();
-					disassembler_close_window();
+					//disassembler_close_window();
 					//locals_close_window();
 
 					console_printf(OUTPUT_SYSTEM, "Program has ended");
@@ -569,21 +619,13 @@ void event_loop()
 				{
 					hex_event_handler();
 				}
-				if (wait & disassembler_obtain_window_signal())
-				{
-					disassembler_event_handler();
-				}
 				if (wait & breakpoints_obtain_window_signal())
 				{
 					breakpoints_event_handler();
 				}
-				if (wait & arexx_obtain_signal())
+				if(wait & arexx_obtain_signal())
 				{
 					arexx_event_handler();
-				}
-				if (wait & arexxconsole_obtain_window_signal())
-				{
-					arexxconsole_event_handler();
 				}
 				if(wait & pipe_obtain_signal())
 				{
@@ -612,15 +654,9 @@ void cleanup()
 	free_symbols();
 	stabs_free_stabs();
 
-	//registers_close_window();
-	//locals_close_window();
 	hex_close_window();
-	//stacktrace_close_window();
-	//globals_close_window();
-	disassembler_close_window();
 	breakpoints_close_window();
 	main_close_window();
-	arexxconsole_close_window();
 	arexx_close_port();
 	
 	pipe_cleanup();
@@ -629,6 +665,8 @@ void cleanup()
 	console_cleanup();
 	stacktrace_cleanup();
 	source_cleanup();
+	disassembler_cleanup();
+	
 	freemem_free_hook(main_freemem_hook);
 }
 
@@ -760,125 +798,144 @@ void main_attach(struct Process *pr)
 	}
 }
 
+struct apExecute arexxexecute;
+char arexxcommandstring[1024];
 
 void main_event_handler()
 {
-			ULONG result;
-            WORD Code;
-            static char *strinfo, *args;
-			static char *path;
-			int line=0;
-			int *iptr;
-            struct Node *node;
-			uint32 addr;
-			struct Process *pr;
+	ULONG result;
+    WORD Code;
+    static char *strinfo, *args;
+	static char *path;
+	int line=0;
+	int *iptr;
+    struct Node *node;
+	uint32 addr;
+	struct Process *pr;
 
+    while ((result = RA_HandleInput(MainWinObj, &Code)) != WMHI_LASTMSG && done != TRUE)
+    {
+		switch (result & WMHI_CLASSMASK)
+        {
+        	case WMHI_CLOSEWINDOW:
+            	done = TRUE;
+                break;
 
-                while ((result = RA_HandleInput(MainWinObj, &Code)) != WMHI_LASTMSG && done != TRUE)
-                {
-                    switch (result & WMHI_CLASSMASK)
-                    {
-                        case WMHI_CLOSEWINDOW:
-                            done = TRUE;
-                            break;
+            case WMHI_GADGETUP:
+            switch(result & WMHI_GADGETMASK)
+            {
+				case GAD_FILENAME_BUTTON:
 
-                         case WMHI_GADGETUP:
-                            switch(result & WMHI_GADGETMASK)
-                            {
-                                case GAD_FILENAME_BUTTON:
+					strinfo = request_file(mainwin, &path);
+					if (!strinfo)
+						break;
 
-									strinfo = request_file(mainwin, &path);
-									if (!strinfo)
-										break;
+					strcpy (filename, strinfo);
+					if (strlen(path) > 0)
+					{
+						strcpy (childpath, path);
+					}
 
-									strcpy (filename, strinfo);
-									if (strlen(path) > 0)
-									{
-										strcpy (childpath, path);
-									}
+					args = request_arguments();
 
-									args = request_arguments();
-
-									main_load (strinfo, path, args);
+					main_load (strinfo, path, args);
 									
-                                    break;
+                    break;
                                     
-								case GAD_RELOAD_BUTTON:
+				case GAD_RELOAD_BUTTON:
 								
-									main_load(strinfo, path, args);
+					main_load(strinfo, path, args);
+					break;
 									
-									break;
-									
-								case GAD_ATTACH_BUTTON:
+				case GAD_ATTACH_BUTTON:
 
-									pr = attach_select_process();
-									main_attach (pr);
+					pr = attach_select_process();
+					main_attach (pr);
+					break;
 
-									break;
+				case GAD_START_BUTTON:
 
-								case GAD_START_BUTTON:
+					main_play();
+					break;
 
-									main_play();
-									break;
+				case GAD_PAUSE_BUTTON:
 
-								case GAD_PAUSE_BUTTON:
+					main_pause();
+					break;
 
-									main_pause();
-									break;
+				case GAD_STEPOVER_BUTTON:
 
-								case GAD_STEPOVER_BUTTON:
+					main_step();
+					break;
 
-									main_step();
-									break;
+				case GAD_KILL_BUTTON:
 
-								case GAD_KILL_BUTTON:
+					main_kill();
+					break;
+#if 0
+				case GAD_CRASH_BUTTON:
 
-									main_kill();
-									break;
+					crash();
+					break;
+#endif
+				case GAD_SETBREAK_BUTTON:
 
-								case GAD_CRASH_BUTTON:
+					breakpoints_open_window();
+					break;
 
-									crash();
-
-									break;
-
-								case GAD_SETBREAK_BUTTON:
-
-									breakpoints_open_window();
-
-									break;
-
-								case GAD_VARIABLES_LISTBROWSER:
+				case GAD_VARIABLES_LISTBROWSER:
 								
-									locals_handle_input();
-									break;
+					locals_handle_input();
+					break;
 
-								case GAD_X_BUTTON:
+				case GAD_X_BUTTON:
 
-									console_clear();
-									break;
+					console_clear();
+					break;
 
-								case GAD_HEX_BUTTON:
+				case GAD_HEX_BUTTON:
 
-									hex_open_window();
-									break;
+					hex_open_window();
+					break;
 
-								case GAD_DISASSEMBLE_BUTTON:
-									disassembler_open_window();
-									break;
+				case GAD_DISASSEMBLER_LISTBROWSER:
+					disassembler_show_selected();
+					break;
+									
+				case GAD_DISASSEMBLER_STEP_BUTTON:
+					asmstep();
+					break;
+									
+				case GAD_DISASSEMBLER_SKIP_BUTTON:
+					asmskip();
+					break;
 
+				case GAD_AREXX_BUTTON:
+				case GAD_AREXX_STRING:
+				{
+					char *str;
+									
+                    IIntuition->GetAttrs( ArexxStringObj, STRINGA_TextVal, &str, TAG_DONE );
+					strcpy (arexxcommandstring, str);
 
-								case GAD_AREXX_BUTTON:
+					arexxexecute.MethodID = AM_EXECUTE;
+					arexxexecute.ape_CommandString = arexxcommandstring;
+					arexxexecute.ape_PortName = "AREXXDB101";
+					arexxexecute.ape_IO = (BPTR)NULL;
 
-									arexxconsole_open_window();
-									break;
-                            }
-                            break;
-                    }
-                }
+                    IIntuition->SetAttrs( ArexxStringObj, STRINGA_TextVal, "", TAG_DONE );
+					IIntuition->RefreshGadgets ((struct Gadget *)ArexxStringObj, mainwin, NULL);
 
-			return;
+					console_printf(OUTPUT_AREXX, arexxcommandstring);
+					IIntuition->IDoMethodA(arexx_obj, (Msg)&arexxexecute);
 
+					break;
+				}
+			}
+			break;
+		}
+	}
+	return;
 }
 
 void main_close_window()

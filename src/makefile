@@ -63,8 +63,8 @@ freemem.o: freemem.c freemem.h
 arexxport.o: arexxport.c arexxport.h suspend.h breakpoints.h gui.h
 	$(CC) -c -gstabs -o arexxport.o arexxport.c
 
-arexxconsole.o: arexxconsole.c arexxconsole.h
-	$(CC) -c -gstabs -o arexxconsole.o arexxconsole.c
+#arexxconsole.o: arexxconsole.c arexxconsole.h
+#	$(CC) -c -gstabs -o arexxconsole.o arexxconsole.c
 
 console.o: console.c console.h freemem.h
 	$(CC) -c -gstabs -o console.o console.c
@@ -84,8 +84,8 @@ __unix_to_amiga_path_name.o: __unix_to_amiga_path_name.c unix.h
 ../db101: suspend.o symbols.o gui.o hexview.o console.o source.o \
 			stabs.o variables.o pipe.o async.o \
 			disassembler.o main.o breakpoints.o stacktrace.o attach.o breakpointswindow.o \
-			freemem.o arexxport.o arexxconsole.o __unix_to_amiga_path_name.o
+			freemem.o arexxport.o __unix_to_amiga_path_name.o
 	$(CC) -gstabs main.o suspend.o symbols.o gui.o hexview.o stabs.o variables.o \
 			disassembler.o breakpoints.o stacktrace.o attach.o async.o \
-			breakpointswindow.o freemem.o arexxport.o arexxconsole.o console.o source.o pipe.o \
+			breakpointswindow.o freemem.o arexxport.o console.o source.o pipe.o \
 			__unix_to_amiga_path_name.o   -lauto -o ../db101

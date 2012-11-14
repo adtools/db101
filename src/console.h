@@ -16,6 +16,7 @@ enum output_types
 	OUTPUT_WARNING,
 	OUTPUT_SYSTEM,
 	OUTPUT_FROM_EXECUTABLE,
+	OUTPUT_AREXX,
 	OUTPUT_NO_TYPES
 };
 void console_printf(enum output_types, char *, ...);

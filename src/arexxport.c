@@ -21,10 +21,12 @@ quit
 #include "suspend.h"
 #include "gui.h"
 #include "breakpoints.h"
+#include "console.h"
 
 /* ARexx command IDs. */
 enum
 {
+	REXX_HELP,
 	REXX_NAME,
 	REXX_PLAY,
 	REXX_PAUSE,
@@ -44,6 +46,7 @@ BOOL arexx_port_is_open = FALSE;
 
 /* Protos for the reply hook and ARexx command functions. */
 STATIC VOID reply_callback(struct Hook *, Object *, struct RexxMsg *);
+STATIC VOID rexx_Help (struct ARexxCmd *, struct RexxMsg *);
 STATIC VOID rexx_Name (struct ARexxCmd *, struct RexxMsg *);
 STATIC VOID rexx_Play (struct ARexxCmd *, struct RexxMsg *);
 STATIC VOID rexx_Pause(struct ARexxCmd *, struct RexxMsg *);
@@ -63,6 +66,7 @@ STATIC struct Hook reply_hook;
 /* This array must never be const because arexx.class writes into it. */
 STATIC struct ARexxCmd Commands[] =
 {
+	{"HELP",		REXX_HELP,		rexx_Help,		NULL,					0, NULL, 0, 0, NULL},
 	{"NAME",		REXX_NAME,		rexx_Name,		NULL,       			0, NULL, 0, 0, NULL},
 	{"PLAY",		REXX_PLAY,		rexx_Play,		NULL,       			0, NULL, 0, 0, NULL},
 	{"PAUSE",		REXX_PAUSE,		rexx_Pause,		NULL,       			0, NULL, 0, 0, NULL},
@@ -129,10 +133,31 @@ void arexx_close_port()
 */
 STATIC VOID reply_callback (struct Hook *hook UNUSED, Object *o UNUSED, struct RexxMsg *rxm)
 {
-	//IDOS->Printf("Args[0]: %s\nResult1: %ld Result2: %ld\n",
-	//rxm->rm_Args[0], rxm->rm_Result1, rxm->rm_Result2);
+	if(rxm->rm_Result1 == 20 && rxm->rm_Result2 == 0)
+	{
+		console_printf(OUTPUT_AREXX, "%s is NOT and Arexx command!", rxm->rm_Args[0]);
+		console_printf(OUTPUT_AREXX, "For a list of known commands, type HELP");
+	}
+	else if(rxm->rm_Result1 == 1 && rxm->rm_Result2 == 0)
+		console_printf(OUTPUT_AREXX, "Command %s was successful (r1=%ld, r2=%ld)", rxm->rm_Args[0], rxm->rm_Result1, rxm->rm_Result2);
 }
 
+STATIC VOID rexx_Help (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
+{
+	console_printf(OUTPUT_AREXX, " ===== AREXX HELP ===== ");
+	console_printf(OUTPUT_AREXX, " NAME: returns the name of db101");
+	console_printf(OUTPUT_AREXX, " LOAD <filename>: load and executable file");
+	console_printf(OUTPUT_AREXX, " PLAY: execute file from the current address");
+	console_printf(OUTPUT_AREXX, " PAUSE: pause execution of current executable");
+	console_printf(OUTPUT_AREXX, " STEP: execute the next line and stop");
+	console_printf(OUTPUT_AREXX, " KILL: kill the executable (dangerous)");
+	console_printf(OUTPUT_AREXX, " ATTACH <process>: try to attach debugger to a running process");
+	console_printf(OUTPUT_AREXX, " QUIT: leave db101 (will kill current process)");
+	console_printf(OUTPUT_AREXX, " BREAKLINE <line> <file>: will attempt to set up a breakpoint at a line in a sourcefile");
+	console_printf(OUTPUT_AREXX, " BREAK <function>: will set up a breakpoint at the beginning of a function");
+	console_printf(OUTPUT_AREXX, " ===== (DONE) ===== ");
+}	
+	
 /* NAME */
 STATIC VOID rexx_Name (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
@@ -142,7 +167,6 @@ STATIC VOID rexx_Name (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 
 STATIC VOID rexx_Play (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
-	printf("PLAY command\n");
 	main_play();
 	ac->ac_RC = TRUE;
 }
@@ -150,14 +174,12 @@ STATIC VOID rexx_Play (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 
 STATIC VOID rexx_Pause (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
-	printf("PAUSE command\n");
 	main_pause();
 	ac->ac_RC = TRUE;
 }
 
 STATIC VOID rexx_Step (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
-	printf("STEP command\n");
 	main_step();
 	ac->ac_RC = TRUE;
 }
@@ -165,14 +187,12 @@ STATIC VOID rexx_Step (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 
 STATIC VOID rexx_Kill (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
-	printf("KILL command\n");
 	main_kill();
 	ac->ac_RC = TRUE;
 }
 
 STATIC VOID rexx_Load (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
-	printf("LOAD command\n");
 	/* Print some text */
 	if (ac->ac_ArgList[0])
 	{
@@ -183,8 +203,6 @@ STATIC VOID rexx_Load (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 
 STATIC VOID rexx_Attach (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
-	printf("ATTACH command\n");
-
 	printf("process = %s\n", (char *)ac->ac_ArgList[0]);
 	//TODO: find process by name?
 	struct Process *pr = (struct Process *)IExec->FindTask ((char *)ac->ac_ArgList[0]);
@@ -199,8 +217,6 @@ STATIC VOID rexx_Attach (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 
 STATIC VOID rexx_Quit (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
-	printf("QUIT command\n");
-
 	struct Task *me = IExec->FindTask (NULL);
 	IExec->Signal (me, SIGBREAKF_CTRL_C);
 
@@ -209,8 +225,6 @@ STATIC VOID rexx_Quit (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 
 STATIC VOID rexx_Breakline (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
-	printf("BREAKLINE command\n");
-
 	printf("arg[0] = %d\n", *((uint32*)ac->ac_ArgList[0]));
 	printf("arg[1] = %s\n", (char *)ac->ac_ArgList[1]);
 
@@ -219,9 +233,7 @@ STATIC VOID rexx_Breakline (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 
 STATIC VOID rexx_Break (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
-	printf("BREAK command\n");
-
-	printf("arg[0] = %s\n", (char *)ac->ac_ArgList[0]);
+	console_printf(OUTPUT_AREXX, "arg[0] = %s\n", (char *)ac->ac_ArgList[0]);
 
 	ac->ac_RC = breakpoint_function ((char *)ac->ac_ArgList[0]);
 }

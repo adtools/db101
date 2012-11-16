@@ -63,9 +63,6 @@ freemem.o: freemem.c freemem.h
 arexxport.o: arexxport.c arexxport.h suspend.h breakpoints.h gui.h
 	$(CC) -c -gstabs -o arexxport.o arexxport.c
 
-#arexxconsole.o: arexxconsole.c arexxconsole.h
-#	$(CC) -c -gstabs -o arexxconsole.o arexxconsole.c
-
 console.o: console.c console.h freemem.h
 	$(CC) -c -gstabs -o console.o console.c
 
@@ -78,14 +75,17 @@ pipe.o: pipe.c pipe.h
 async.o: async.c async.h
 	$(CC) -c -gstabs -o async.o async.c
 
+sourcelist.o: sourcelist.c sourcelist.h
+	$(CC) -c -gstabs -o sourcelist.o sourcelist.c
+
 __unix_to_amiga_path_name.o: __unix_to_amiga_path_name.c unix.h
 	$(CC) -c -gstabs -o __unix_to_amiga_path_name.o __unix_to_amiga_path_name.c
 
 ../db101: suspend.o symbols.o gui.o hexview.o console.o source.o \
-			stabs.o variables.o pipe.o async.o \
+			stabs.o variables.o pipe.o async.o sourcelist.o \
 			disassembler.o main.o breakpoints.o stacktrace.o attach.o breakpointswindow.o \
 			freemem.o arexxport.o __unix_to_amiga_path_name.o
 	$(CC) -gstabs main.o suspend.o symbols.o gui.o hexview.o stabs.o variables.o \
-			disassembler.o breakpoints.o stacktrace.o attach.o async.o \
+			disassembler.o breakpoints.o stacktrace.o attach.o async.o sourcelist.o \
 			breakpointswindow.o freemem.o arexxport.o console.o source.o pipe.o \
 			__unix_to_amiga_path_name.o   -lauto -o ../db101

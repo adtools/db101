@@ -20,6 +20,7 @@ struct stab_function
 	uint32 linetype[1024];
 	uint32 currentline;
 	struct List symbols;
+	struct List params;
 };
 
 enum __line_types
@@ -128,6 +129,8 @@ struct stab_sourcefile
 extern void stabs_interpret_functions(void);
 extern struct stab_function *stabs_get_function_from_address (uint32);
 extern struct stab_function *stabs_get_function_from_name (char *);
+struct stab_function *stabs_sline_to_nline(char *, uint32, uint32 *);
+struct stab_sourcefile *stabs_get_sourcefile(char *);
 void stabs_interpret_functions(void);
 void stabs_interpret_typedefs(void);
 void stabs_interpret_globals(void);

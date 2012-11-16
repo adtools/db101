@@ -21,38 +21,67 @@
 
 struct List global_symbols;
 struct List sourcefile_list;
-struct List function_list;
-
-#if 0
-BOOL stabs_has_functions = FALSE;
-BOOL stabs_has_sourcefiles = FALSE;
-BOOL stabs_has_globals = FALSE;
-#endif
+//struct List function_list;
 
 int stabs_freemem_hook = -1;
 
+
+struct stab_function *stabs_sline_to_nline(char *sourcename, uint32 sline, uint32 *nline)
+{
+	struct stab_sourcefile *s = stabs_get_sourcefile (sourcename);
+	if(s)
+	{
+		struct stab_function *f = (struct stab_function *)IExec->GetHead(&s->function_list);
+		int i;
+
+		while(f)
+		{
+			for( i = 0; i < f->numberoflines; i++)
+			{
+				if( f->lineinfile[i] == sline )
+				{
+					*nline = i;
+					return f;
+				}
+			}
+			f = (struct stab_function *) IExec->GetSucc((struct Node *)f);
+		}
+	}
+	return NULL;
+}
+
 struct stab_function *stabs_get_function_from_address (uint32 faddress)
 {
-	struct stab_function *f = (struct stab_function *)IExec->GetHead (&function_list);
-
-	while (f)
+	struct stab_sourcefile *s = (struct stab_sourcefile *)IExec->GetHead(&sourcefile_list);
+	while(s)
 	{
-		if (faddress >= f->address && faddress < f->address + f->size)
-			return f;
-		f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
+		struct stab_function *f = (struct stab_function *)IExec->GetHead (&s->function_list);
+
+		while (f)
+		{
+			if (faddress >= f->address && faddress < f->address + f->size)
+				return f;
+			f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
+		}
+		s = (struct stab_sourcefile *) IExec->GetSucc((struct Node *)s);
 	}
 	return NULL;
 }
 
 struct stab_function *stabs_get_function_from_name (char *fname)
 {
-	struct stab_function *f = (struct stab_function *)IExec->GetHead (&function_list);
-
-	while (f)
+	struct stab_sourcefile *s = (struct stab_sourcefile *)IExec->GetHead(&sourcefile_list);
+	while(s)
 	{
-		if (!strcmp(f->name, fname))
-			return f;
-		f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
+		struct stab_function *f = (struct stab_function *)IExec->GetHead (&s->function_list);
+
+		while (f)
+		{
+			if (!strcmp(f->name, fname))
+				return f;
+			f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
+		}
+		s = (struct stab_sourcefile *) IExec->GetSucc((struct Node *)s);
 	}
 	return NULL;
 }
@@ -64,7 +93,7 @@ void stabs_interpret_functions ()
 	uint32 *stab = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	if (!stab)
 	{
-		printf("failed to find .stab section...\n");
+		console_printf(OUTPUT_WARNING, "failed to find .stab section...");
 		return;
 	}
 
@@ -80,10 +109,6 @@ void stabs_interpret_functions ()
 	BOOL ispointer = FALSE;
 	char *strptr;
 	struct stab_function *f;
-
-	IExec->NewList (&function_list);
-	//stabs_has_functions = TRUE;
-
 
 	while ((uint32)sym < (uint32)stab + stabsize - sizeof (struct symtab_entry))
 	{
@@ -140,9 +165,11 @@ void stabs_interpret_functions ()
 					f->sourcename = strdup(solname);
 				else
 					f->sourcename = strdup (sourcename);
+
 				f->currentline = 0;
 				f->numberoflines = 0;
 				IExec->NewList (&(f->symbols));
+				IExec->NewList(&f->params);
 				BOOL done = FALSE;
 
 				while (! done )
@@ -197,7 +224,22 @@ void stabs_interpret_functions ()
 						symbol->type = stabs_get_type_from_string(strptr, sourcename);
 						symbol->offset = sym->n_value;
 
-						IExec->AddTail(&(f->symbols), (struct Node *)symbol);
+						IExec->AddTail(&f->symbols, (struct Node *)symbol);
+
+						break;
+
+					case N_PSYM:
+					
+						symbol = freemem_malloc(stabs_freemem_hook, sizeof(struct stab_symbol));
+
+						strptr = &stabstr[sym->n_strx];
+						symbol->name = stabs_strdup_strip (strptr);
+						symbol->location = L_STACK;
+						strptr = skip_in_string (strptr, ":");
+						symbol->type = stabs_get_type_from_string(strptr, sourcename);
+						symbol->offset = sym->n_value;
+
+						IExec->AddTail(&f->params, (struct Node *)symbol);
 
 						break;
 
@@ -227,7 +269,9 @@ void stabs_interpret_functions ()
 						break;
 					}
 				}
-				IExec->AddTail (&function_list, (struct Node *)f);
+				struct stab_sourcefile *s = stabs_get_sourcefile(f->sourcename);
+				if(s)
+					IExec->AddTail(&s->function_list, (struct Node *)f);
 			}
 			break;
 			
@@ -335,27 +379,23 @@ int stabs_interpret_number_token(char *strptr, int *filenum)
 	return atoi (strptr);
 }
 
-struct stab_typedef *stabs_get_type_from_typenum (struct stab_sourcefile *sourcefile, int filenum, int typenum)
+struct stab_typedef *stabs_get_type_from_typenum (struct List *l, int filenum, int typenum)
 {
 	struct stab_typedef *ret = NULL;
 	BOOL done = FALSE;
 
-	if (!sourcefile)
+	if (!l)
 		return NULL;
 
-	struct stab_typedef *t = (struct stab_typedef *)IExec->GetHead(&(sourcefile->typedef_list));
+	struct stab_typedef *t = (struct stab_typedef *)IExec->GetHead(l);
 	
-	if (t)
-	while (!done)
+	while (t)
 	{
 		if (t->filenum == filenum && t->typenum == typenum)
 			return t;
 
-		if ( t == (struct stab_typedef *)IExec->GetTail (&(sourcefile->typedef_list)) )
-			break;
 		t = (struct stab_typedef *) IExec->GetSucc ((struct Node *)t);
 	}
-
 	return NULL;
 }
 
@@ -511,7 +551,7 @@ struct stab_typedef * stabs_get_type_from_string (char *strptr, char *sourcename
 	struct stab_sourcefile *file = stabs_get_sourcefile (sourcename);
 	
 	typenum = stabs_interpret_number_token(strptr, &filenum);
-	t = stabs_get_type_from_typenum (file, filenum, typenum);
+	t = stabs_get_type_from_typenum (&file->typedef_list, filenum, typenum);
 
 	if(!t)
 	{
@@ -660,6 +700,12 @@ struct stab_typedef * stabs_get_type_from_string (char *strptr, char *sourcename
 				t = newt;
 			}
 		}
+	}
+	if(t)
+	{
+		struct stab_typedef *oldt = stabs_get_type_from_typenum (&file->unknown_list, filenum, typenum);
+		if(oldt)
+			IExec->Remove((struct Node *)oldt);
 	}
 	return t;
 }

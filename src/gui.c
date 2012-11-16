@@ -14,6 +14,7 @@
 #include <proto/space.h>
 #include <proto/clicktab.h>
 #include <proto/arexx.h>
+#include <proto/string.h>
 
 #include <classes/window.h>
 #include <classes/requester.h>
@@ -23,6 +24,7 @@
 #include <gadgets/space.h>
 #include <gadgets/clicktab.h>
 #include <classes/arexx.h>
+#include <gadgets/string.h>
 
 #include <reaction/reaction_macros.h>
 
@@ -45,7 +47,6 @@
 #include "breakpointswindow.h"
 #include "freemem.h"
 #include "arexxport.h"
-#include "arexxconsole.h"
 #include "unix.h"
 #include "console.h"
 #include "pipe.h"
@@ -69,6 +70,7 @@ enum
 	GAD_DISASSEMBLER_LISTBROWSER,
 	GAD_DISASSEMBLER_STEP_BUTTON,
 	GAD_DISASSEMBLER_SKIP_BUTTON,
+	GAD_SOURCELIST_LISTBROWSER,
 	GAD_CONSOLE_LISTBROWSER,
 	GAD_AREXX_STRING,
 	GAD_AREXX_BUTTON,
@@ -81,6 +83,7 @@ extern struct List stacktrace_list;
 extern struct List console_list;
 extern struct List source_list;
 extern struct List disassembly_list;
+extern struct List sourcelist_list;
 
 extern struct ColumnInfo *variablescolumninfo;
 extern struct ColumnInfo *sourcecolumninfo;
@@ -94,10 +97,11 @@ Object *SelectButtonObj, *ReloadButtonObj, *FilenameStringObj, *AttachButtonObj;
 Object *StartButtonObj, *PauseButtonObj, *StepOverButtonObj, *StepIntoButtonObj, *KillButtonObj, *CrashButtonObj, *SetBreakButtonObj, *XButtonObj;
 Object *HexviewButtonObj, *DisassembleviewButtonObj, *StacktraceButtonObj;
 Object *ArexxButtonObj, *ArexxStringObj, *arexx_obj;
+Object *SourcelistListBrowserObj;
 extern Object *VariablesListBrowserObj, *StacktraceListBrowserObj, *DisassemblerListBrowserObj, *ConsoleListBrowserObj, *SourceListBrowserObj;
 extern Object *DisassemblerStepButtonObj, *DisassemblerSkipButtonObj;
 
-char lastdir[1024] = "src"; //"qt:examples/widgets/calculator"; //work:code/medium/StangTennis2D";
+char lastdir[1024] = "qt:examples/widgets/calculator"; //work:code/medium/StangTennis2D"; "src"; 
 char filename[1024] = "";
 char childpath[1024] = "";
 
@@ -215,6 +219,7 @@ void main_open_window()
 	stacktrace_init();
 	source_init();
 	disassembler_init();
+	sourcelist_init();
 	
 	pipe_init();
 
@@ -258,6 +263,7 @@ void main_open_window()
 	                    GA_HintInfo, "Filename",
 						GA_Disabled, TRUE,
 						GA_ReadOnly, TRUE,
+						STRINGA_MinVisible, 10,
 						STRINGA_TextVal, "Select File",
 	                StringEnd,
 
@@ -320,19 +326,19 @@ void main_open_window()
 						GA_Disabled, TRUE,
 					ButtonEnd,
 	                CHILD_WeightedHeight, 0,
-
-					LAYOUT_AddChild, SetBreakButtonObj = ButtonObject,
-						GA_ID, GAD_SETBREAK_BUTTON,
-	                    GA_RelVerify, TRUE,
-						GA_Text, "Set Break",
-						GA_Disabled, TRUE,
-					ButtonEnd,
-	                CHILD_WeightedHeight, 0,
-
+	                
 					LAYOUT_AddChild, SpaceObject,
 						SPACE_MinWidth, 24,
 					SpaceEnd,
 					
+					LAYOUT_AddChild, SetBreakButtonObj = ButtonObject,
+						GA_ID, GAD_SETBREAK_BUTTON,
+	                    GA_RelVerify, TRUE,
+						GA_Text, "Breaks",
+						GA_Disabled, TRUE,
+					ButtonEnd,
+	                CHILD_WeightedHeight, 0,
+
 					LAYOUT_AddChild, HexviewButtonObj = ButtonObject,
 						GA_ID, GAD_HEX_BUTTON,
 	                    GA_RelVerify, TRUE,
@@ -373,57 +379,71 @@ void main_open_window()
 	                ListBrowserEnd,
 	            EndMember,
 	            
-	            LAYOUT_AddChild, /*(struct Gadget *)*/ClickTabObject,
-	            	GA_Text, PageLabels_1,
+	            LAYOUT_AddChild, HLayoutObject,
+		            LAYOUT_AddChild, ClickTabObject,
+		            	GA_Text, PageLabels_1,
 
-	            	CLICKTAB_Current,	0,
-	            	CLICKTAB_PageGroup,	PageObject,
-			    		PAGE_Add, VLayoutObject,
-			    			//LAYOUT_SpaceOuter,	TRUE,
-			    			//LAYOUT_DeferLayout,	TRUE,
-			    			LAYOUT_AddChild, SourceListBrowserObj = ListBrowserObject,
-			    	        	GA_ID,                     GAD_SOURCE_LISTBROWSER,
-	        			    	GA_RelVerify,              TRUE,
-	            				GA_TabCycle,               TRUE,
-	                			LISTBROWSER_AutoFit,       TRUE,
-	                    		LISTBROWSER_Labels,        &source_list,
-	                    		LISTBROWSER_ColumnInfo,    sourcecolumninfo,
-	              	    		LISTBROWSER_ColumnTitles,  TRUE,
-	                			LISTBROWSER_ShowSelected,  TRUE,
-								//LISTBROWSER_Striping,      LBS_ROWS,
-							ListBrowserEnd,
-						EndMember,
+		            	CLICKTAB_Current,	0,
+		            	CLICKTAB_PageGroup,	PageObject,
+				    		PAGE_Add, VLayoutObject,
+				    			//LAYOUT_SpaceOuter,	TRUE,
+				    			//LAYOUT_DeferLayout,	TRUE,
+				    			LAYOUT_AddChild, SourceListBrowserObj = ListBrowserObject,
+				    	        	GA_ID,                     GAD_SOURCE_LISTBROWSER,
+		        			    	GA_RelVerify,              TRUE,
+		            				GA_TabCycle,               TRUE,
+		                			LISTBROWSER_AutoFit,       TRUE,
+		                    		LISTBROWSER_Labels,        &source_list,
+		                    		LISTBROWSER_ColumnInfo,    sourcecolumninfo,
+		              	    		LISTBROWSER_ColumnTitles,  TRUE,
+		                			LISTBROWSER_ShowSelected,  TRUE,
+									//LISTBROWSER_Striping,      LBS_ROWS,
+								ListBrowserEnd,
+							EndMember,
 						
-						PAGE_Add, VLayoutObject,
-							LAYOUT_AddChild, DisassemblerListBrowserObj = ListBrowserObject,
-		    	        	    GA_ID,                     GAD_DISASSEMBLER_LISTBROWSER,
-    		    	    	    GA_RelVerify,              TRUE,
-        		    		    GA_TabCycle,               TRUE,
-								//GA_TextAttr,			   &courier_font,
-        	    	    		LISTBROWSER_AutoFit,       TRUE,
-        	    		  	    LISTBROWSER_Labels,        &disassembly_list,
-        	  		    	  	LISTBROWSER_ShowSelected,  TRUE,
-        	        		    LISTBROWSER_Striping,      LBS_ROWS,
-							ListBrowserEnd,
+							PAGE_Add, VLayoutObject,
+								LAYOUT_AddChild, DisassemblerListBrowserObj = ListBrowserObject,
+			    	        	    GA_ID,                     GAD_DISASSEMBLER_LISTBROWSER,
+	    		    	    	    GA_RelVerify,              TRUE,
+	        		    		    GA_TabCycle,               TRUE,
+									//GA_TextAttr,			   &courier_font,
+	        	    	    		LISTBROWSER_AutoFit,       TRUE,
+	        	    		  	    LISTBROWSER_Labels,        &disassembly_list,
+	        	  		    	  	LISTBROWSER_ShowSelected,  TRUE,
+	        	        		    LISTBROWSER_Striping,      LBS_ROWS,
+								ListBrowserEnd,
 							
-							LAYOUT_AddChild, HLayoutObject,
-								LAYOUT_AddChild, DisassemblerStepButtonObj = ButtonObject,
-    	            			    GA_ID, GAD_DISASSEMBLER_STEP_BUTTON,
-									GA_RelVerify, TRUE,
-            	    			    GA_Text, "Step",
-            			    	ButtonEnd,
-			                	CHILD_WeightedHeight, 0,
+								LAYOUT_AddChild, HLayoutObject,
+									LAYOUT_AddChild, DisassemblerStepButtonObj = ButtonObject,
+	    	            			    GA_ID, GAD_DISASSEMBLER_STEP_BUTTON,
+										GA_RelVerify, TRUE,
+	            	    			    GA_Text, "Step",
+	            			    	ButtonEnd,
+				                	CHILD_WeightedHeight, 0,
 
-	                			LAYOUT_AddChild, DisassemblerSkipButtonObj = ButtonObject,
-    	            			    GA_ID, GAD_DISASSEMBLER_SKIP_BUTTON,
-									GA_RelVerify, TRUE,
-            	        			GA_Text, "Skip",
-            				   	ButtonEnd,
+		                			LAYOUT_AddChild, DisassemblerSkipButtonObj = ButtonObject,
+	    	            			    GA_ID, GAD_DISASSEMBLER_SKIP_BUTTON,
+										GA_RelVerify, TRUE,
+	            	        			GA_Text, "Skip",
+    	        				   	ButtonEnd,
+				                	CHILD_WeightedHeight, 0,
+								EndMember,
 			                	CHILD_WeightedHeight, 0,
 							EndMember,
-		                	CHILD_WeightedHeight, 0,
-						EndMember,
-					PageEnd,
+						PageEnd,
+					EndMember,
+					
+					LAYOUT_WeightBar,	TRUE,
+					LAYOUT_AddChild, SourcelistListBrowserObj = ListBrowserObject,
+						GA_ID,                     GAD_SOURCELIST_LISTBROWSER,
+	    		    	GA_RelVerify,              TRUE,
+	        		    GA_TabCycle,               TRUE,
+						LISTBROWSER_AutoFit,       TRUE,
+	        	    	LISTBROWSER_Labels,        &sourcelist_list,
+	        	  		LISTBROWSER_ShowSelected,  TRUE,
+	        	        LISTBROWSER_Striping,      LBS_ROWS,
+					ListBrowserEnd,
+					CHILD_WeightedWidth,		20,
 				EndMember,
 				
 				LAYOUT_AddChild, HLayoutObject,
@@ -666,6 +686,7 @@ void cleanup()
 	stacktrace_cleanup();
 	source_cleanup();
 	disassembler_cleanup();
+	sourcelist_cleanup();
 	
 	freemem_free_hook(main_freemem_hook);
 }
@@ -763,6 +784,7 @@ void main_load(char *name, char *path, char *args)
 		IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
 														STRINGA_TextVal, name,
 														TAG_DONE);
+		sourcelist_update();
 	}
 }
 
@@ -910,6 +932,14 @@ void main_event_handler()
 					asmskip();
 					break;
 
+				case GAD_SOURCE_LISTBROWSER:
+					source_handle_input();
+					break;
+				
+				case GAD_SOURCELIST_LISTBROWSER:
+					sourcelist_handle_input();
+					break;
+					
 				case GAD_AREXX_BUTTON:
 				case GAD_AREXX_STRING:
 				{

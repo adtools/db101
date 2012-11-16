@@ -103,11 +103,11 @@ void insert_line_breakpoints()
 	if (f->linetype[i] == LINE_LOOP)
 	{
 		uint32 newline = translate_sline_to_nline (f->lineinfile[i]);
-		insert_breakpoint (f->address + f->lines[newline+1], BR_LINE);
-		insert_breakpoint (f->address + f->lines[i+1], BR_LINE);
+		insert_breakpoint (f->address + f->lines[newline+1], BR_LINE, NULL, 0);
+		insert_breakpoint (f->address + f->lines[i+1], BR_LINE, NULL, 0);
 	}
 	else
-		insert_breakpoint (f->address + f->lines[i+1], BR_LINE);
+		insert_breakpoint (f->address + f->lines[i+1], BR_LINE, NULL, 0);
 }
 
 void remove_line_breakpoints()
@@ -186,60 +186,54 @@ void guess_line_in_function ()
 	f->currentline = f->numberoflines-1;
 }
 
-BOOL breakpoint_line_in_file (uint32 line, char *file)
+BOOL breakpoint_line_in_file (uint32 sline, char *file)
 {
-	struct stab_function *f = (struct stab_function *)IExec->GetHead(&function_list);
-	while (f)
+	uint32 nline;
+	struct stab_function *f = stabs_sline_to_nline(file, sline, &nline);
+	if(f)
 	{
-		if (!strcmp (f->sourcename, file))
-		{
-			int i;
-			for (i = 0; i < f->numberoflines; i++)
-			{
-				if (f->lineinfile[i] == line)
-				{
-					insert_breakpoint (f->address+f->lines[i], LINE_NORMAL);
-					return TRUE;
-				}
-			}
-		}
-		f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
+		insert_breakpoint (f->address + f->lines[nline], BR_NORMAL_FUNCTION, (APTR)f, sline);
+		return TRUE;
 	}
 	return FALSE;
 }
 
 BOOL breakpoint_function (char *fname)
 {
-	struct stab_function *f = (struct stab_function *)IExec->GetHead(&function_list);
-	while (f)
+	struct stab_function *f = stabs_get_function_from_name(fname);
+	if(f)
 	{
-		if (!strcmp (f->name, fname))
-		{
-			insert_breakpoint (f->address, LINE_NORMAL);
-			return TRUE;
-		}
-		f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
+		insert_breakpoint (f->address, BR_NORMAL_FUNCTION, f, 0);
+		return TRUE;
 	}
 	return FALSE;
 }
 
 
-void insert_breakpoint(uint32 addr, uint32 type)
+void insert_breakpoint(uint32 addr, uint32 type, APTR object, uint32 line)
 {
 	if(is_breakpoint_at(addr))
 		return;
 
-//printf("insert breakpoint at 0x%x\n", addr);
-	struct breakpoint *b = IExec->AllocMem (sizeof(struct breakpoint), MEMF_ANY|MEMF_CLEAR);
+	struct breakpoint *b = IExec->AllocVecTags (sizeof(struct breakpoint), TAG_DONE);
 
 	b->address = addr;
 	b->type = type;
 	b->save_buffer = 0;
-
+	switch(type)
+	{
+		case BR_NORMAL_SYMBOL:
+			b->symbol = (struct amigaos_symbol *)object;
+			break;
+		case BR_NORMAL_FUNCTION:
+			b->function = (struct stab_function *)object;
+			b->line = line;
+			break;
+	}
 	IExec->AddTail (&breakpoint_list, (struct Node *)b);
 }
 
-void remove_breakpoint (uint32 addr)
+void remove_breakpoint(uint32 addr)
 {
 	if (!is_breakpoint_at(addr))
 		return;
@@ -254,12 +248,18 @@ void remove_breakpoint (uint32 addr)
 		if (addr == b->address)
 		{
 			IExec->Remove (node);
-			IExec->FreeMem (b, sizeof (struct breakpoint));	
+			IExec->FreeVec (b);	
 			break;
 		}
 
 		node = IExec->GetSucc (node);
 	}
+}
+
+void remove_breakpoint_node(struct breakpoint *p)
+{
+	if(p)
+		IExec->Remove((struct Node *)p);
 }
 
 void free_breakpoints ()

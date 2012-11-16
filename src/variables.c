@@ -40,6 +40,9 @@
 #include "freemem.h"
 
 
+#define dprintf(format...)	IExec->DebugPrintF(format)
+
+
 Object *VariablesListBrowserObj;
 extern struct Window *mainwin;
 
@@ -50,11 +53,13 @@ struct ColumnInfo *variablescolumninfo;
 
 char *vardummytext = "dummy";
 
+struct Node *params_node = NULL;
 struct Node *locals_node = NULL;
 struct Node *globals_node = NULL;
 struct Node *registers_node = NULL;
 int globals_list_populated = 0;
 int locals_list_populated = 0;
+int params_list_populated = 0;
 
 extern struct stab_function *current_function;
 struct stab_function *variables_shown_function = NULL;
@@ -95,12 +100,16 @@ uint32 get_pointer_value(struct stab_symbol *s)
         uint32 stackp = (uint32)process->pr_Task.tc_SPReg;
         uint32 addr = stackp + s->offset;
 
+		if(!is_readable_address(addr))
+			return 0x0;
         return *(uint32 *)addr;
         }
 
     case L_ABSOLUTE:
         {
         uint32 addr = s->address;
+        if(!is_readable_address(addr))
+        	return 0x0;
 		return *(uint32 *)addr;
         }
 	case L_POINTER:
@@ -145,6 +154,9 @@ char *print_variable_value(struct stab_symbol *s)
         printf( "Not a known variable type" );
         break;
     }
+    
+    if(!is_readable_address((uint32)addr))
+    	return "<ACCESS DENIED>";
     
     if (s->type == NULL)
     {
@@ -270,7 +282,27 @@ struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32
 {
 	uint32 hidflag = (hidden ? LBFLG_HIDDEN : 0);
 	struct Node *node;
-		
+
+	if(!s->type)
+	{
+		if (node = IListBrowser->AllocListBrowserNode(2,
+		        								LBNA_Generation, gen+1,
+		        								LBNA_Flags, hidflag,
+                                                LBNA_Column, 0,
+                                                LBNA_UserData, NULL,
+                                                	LBNCA_CopyText, TRUE,
+                                                	LBNCA_Text, s->name,
+                                                LBNA_Column, 1,
+                                               		LBNCA_Text, "(unknown type)",
+                                                TAG_DONE))
+                                    {
+                                    	if(n)
+	                                        IExec->Insert(&variable_list, node, n);
+	                                    else
+	                                    	IExec->AddTail(&variable_list, node);
+                                    }
+		return node;
+	}
 	switch(s->type->type)
 	{
       	case T_UNKNOWN:
@@ -433,6 +465,25 @@ struct Node *variables_add_pointer_children(struct Node *n, struct stab_symbol *
 	return variables_add_children(n, news, gen, hidden);
 }
 
+void params_populate_list(struct Node *node)
+{
+    struct Node *n = node;
+
+    struct List *l = &(current_function->params);
+    struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
+
+	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+    while (s)
+    {
+    	n = variables_add_children(n, s, 1, FALSE); //not hidden
+    	
+        s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
+    }
+	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+	
+	params_list_populated = 1;
+}
+
 void locals_populate_list(struct Node *node)
 {
     struct Node *n = node;
@@ -441,13 +492,10 @@ void locals_populate_list(struct Node *node)
     struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
 
 	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
-    if (s)
-    while (1)
+    while (s)
     {
     	n = variables_add_children(n, s, 1, FALSE); //not hidden
     	
-		if ((struct Node *)s == IExec->GetTail(l))
-            break;
         s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
     }
 	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
@@ -463,13 +511,9 @@ void globals_populate_list(struct Node *node)
     struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
 
 	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
-    if (s)
-    while (1)
+    while (s)
     {
     	n = variables_add_children(n, s, 1, FALSE); //not hidden
-    	
-		if ((struct Node *)s == IExec->GetTail(l))
-            break;
         s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
     }
 	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
@@ -620,17 +664,16 @@ void registers_update()
 
 void variables_init_parents()
 {
-	if (globals_node = IListBrowser->AllocListBrowserNode(2,
+	if (params_node = IListBrowser->AllocListBrowserNode(2,
 		        								LBNA_Generation, 1,
 		        								LBNA_Flags, LBFLG_HASCHILDREN,
                                                 LBNA_Column, 0,
                                                 	LBNCA_CopyText, TRUE,
-                                                	LBNCA_Text, "globals",
+                                                	LBNCA_Text, "parameters",
                                                 TAG_DONE))
     {
-       	IExec->AddTail(&variable_list, globals_node);
+       	IExec->AddTail(&variable_list, params_node);
     }
-
 	if (locals_node = IListBrowser->AllocListBrowserNode(2,
 		        								LBNA_Generation, 1,
 		        								LBNA_Flags, LBFLG_HASCHILDREN,
@@ -640,6 +683,16 @@ void variables_init_parents()
                                                 TAG_DONE))
     {
        	IExec->AddTail(&variable_list, locals_node);
+    }
+	if (globals_node = IListBrowser->AllocListBrowserNode(2,
+		        								LBNA_Generation, 1,
+		        								LBNA_Flags, LBFLG_HASCHILDREN,
+                                                LBNA_Column, 0,
+                                                	LBNCA_CopyText, TRUE,
+                                                	LBNCA_Text, "globals",
+                                                TAG_DONE))
+    {
+       	IExec->AddTail(&variable_list, globals_node);
     }
     if(registers_node = IListBrowser->AllocListBrowserNode(2,
 		        								LBNA_Generation, 1,
@@ -657,8 +710,7 @@ void update_variables()
 {
 	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
 	struct Node *n = IExec->GetHead(&variable_list);
-	if(n)
-	while(1)
+	while(n)
 	{
 		if (n == registers_node)
             break;
@@ -695,6 +747,7 @@ void locals_update()
 	    IExec->NewList (&variable_list);
 	    globals_list_populated = 0;
 	    locals_list_populated = 0;
+	    params_list_populated = 0;
 	    variables_init_parents();
 		//locals_populate_list(locals_node);
 		registers_populate_list();
@@ -719,6 +772,11 @@ void locals_handle_input()
 		if(n == locals_node && !locals_list_populated)
 		{
 			locals_populate_list(locals_node);
+			return;
+		}
+		if(n == params_node && !params_list_populated)
+		{
+			params_populate_list(params_node);
 			return;
 		}
 		struct variables_userdata *u;

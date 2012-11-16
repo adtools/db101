@@ -4,7 +4,7 @@ void init_breakpoints();
 BOOL is_breakpoint_at(uint32);
 void install_all_breakpoints(void);
 void suspend_all_breakpoints(void);
-void insert_breakpoint (uint32, uint32);
+void insert_breakpoint (uint32, uint32, APTR, uint32);
 void remove_breakpoint (uint32);
 void insert_line_breakpoints(void);
 void remove_line_breakpoints(void);
@@ -27,11 +27,26 @@ struct breakpoint
 	uint32 address;
 	uint32 save_buffer;
 	uint32 type;
+	//uint32 state;
+	union {
+		struct stab_function *function;
+		struct amigaos_symbol *symbol;
+	};
+	uint32 line;
 };
+#if 0
+enum __breakpoint_state
+{
+	BR_ACTIVE,
+	BR_SUSPENDED
+};
+#endif
 
 enum __breakpoint_type
 {
-	BR_NORMAL,
+	BR_NORMAL_FUNCTION,
+	BR_NORMAL_SYMBOL,
+	BR_NORMAL_ABSOLUTE,
 	BR_LINE,
 	BR_TRACE
 };

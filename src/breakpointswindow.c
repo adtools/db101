@@ -14,12 +14,15 @@
 #include <proto/listbrowser.h>
 #include <proto/asl.h>
 #include <proto/elf.h>
-
+#include <proto/space.h>
+#include <proto/string.h>
 
 #include <classes/window.h>
 #include <gadgets/button.h>
 #include <gadgets/listbrowser.h>
 #include <images/label.h>
+#include <gadgets/space.h>
+#include <gadgets/string.h>
 
 #include <reaction/reaction_macros.h>
 
@@ -36,99 +39,119 @@
 #include "stabs.h"
 #include "breakpoints.h"
 #include "breakpointswindow.h"
+#include "symbols.h"
 
 enum
 {
-    BREAKPOINTS_BUTTON = 1,
-    BREAKPOINTS_LISTBROWSER
+    BP_DONE_BUTTON = 1,
+    BP_SYMBOLS_LISTBROWSER,
+    BP_BREAKPOINTS_LISTBROWSER,
+    BP_SYMBOL_ADD_BUTTON,
+    BP_ADDRESS_ADD_BUTTON,
+    BP_ADDRESS_STRING,
+    BP_REMOVE_BUTTON
 };
 
-Object *BreakpointsWinObj, *BreakpointsButtonObj, *BreakpointsListBrowserObj;
+Object *BPWinObj;
+Object *BPDoneButtonObj, *BPSymbolsListBrowserObj, *BPBreakpointsListBrowserObj;
+Object *BPSymbolAddButtonObj, *BPAddressAddButtonObj, *BPAddressStringObj, *BPRemoveButtonObj;
 struct Window *breakpointswin = NULL;
 
-struct List breakpointslist;
+struct List bp_breakpointslist;
+struct List bp_symbolslist;
+
 struct ColumnInfo *breakpointscolumninfo = NULL;
-int breakpointslist_isempty = TRUE;
+char bp_address_buffer[10] = "";
 
-struct stab_function *breakpoints_get_selected_function(uint32 selected)
+
+void breakpoints_makebplist()
 {
-    struct stab_function *f = (struct stab_function *)IExec->GetHead(&function_list);
-    int i;
-    for (i = 0; i < selected; i++)
-        f = (struct stab_function *)IExec->GetSucc ((struct Node *)f);
-        
-    return f;
-}
+	IIntuition->SetAttrs(BPBreakpointsListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	
+    if (!IsListEmpty(&bp_breakpointslist))
+        IListBrowser->FreeListBrowserList(&bp_breakpointslist);
+	IExec->NewList(&bp_breakpointslist);
 
-static char *nobreaks_str = "-- No breakpoints available --";
-
-void breakpoints_makelist()
-{
-    struct Node *node;
-    struct stab_function *f = (struct stab_function *)IExec->GetHead(&function_list);
-    
-    if (!IsListEmpty(&breakpointslist))
-        breakpoints_freelist();
-
-    IExec->NewList (&breakpointslist);
-	if(!f)
+    IExec->NewList (&bp_breakpointslist);
+	struct breakpoint *br = (struct breakpoint *)IExec->GetHead(&breakpoint_list);
+	int i = 0;
+	while(br)
 	{
-		breakpointslist_isempty = TRUE;
-
-        if (node = IListBrowser->AllocListBrowserNode(2,
+		struct Node *node;
+		char buf[1024];
+		switch(br->type)
+		{
+			case BR_NORMAL_FUNCTION:
+				sprintf(buf, "break %d: (function) %s (line %d)", i, br->function->name, br->line);
+				break;
+			case BR_NORMAL_SYMBOL:
+				sprintf(buf, "break %d: (symbol) %s", i, br->symbol->name);
+				break;
+			case BR_NORMAL_ABSOLUTE:
+				sprintf(buf, "break %d: (absolute) 0x%x", i, br->address);
+				break;
+			default:
+				continue;
+		}
+        if (node = IListBrowser->AllocListBrowserNode(1,
+        										LBNA_UserData, br,
                                                 LBNA_Column, 0,
-                                                LBNCA_Text, nobreaks_str,
+                                                	LBNCA_CopyText, TRUE,
+                                                	LBNCA_Text, buf,
                                                 TAG_DONE))
                                     {
-                                        IExec->AddTail(&breakpointslist, node);
+                                        IExec->AddTail(&bp_breakpointslist, node);
                                     }
-		return;
+		br = (struct breakpoint *)IExec->GetSucc((struct Node *)br);
 	}
+	IIntuition->SetGadgetAttrs((struct Gadget *)BPBreakpointsListBrowserObj, breakpointswin, NULL,
+												LISTBROWSER_Labels, &bp_breakpointslist,
+												TAG_END);
+}
 
-    while(f)
-    {
-        if (node = IListBrowser->AllocListBrowserNode(2,
+void breakpoints_makesymbollist()
+{
+	IIntuition->SetAttrs(BPSymbolsListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	
+    if (!IsListEmpty(&bp_symbolslist))
+        IListBrowser->FreeListBrowserList(&bp_symbolslist);
+	IExec->NewList(&bp_symbolslist);
+
+	struct amigaos_symbol *sym = (struct amigaos_symbol *)IExec->GetHead(&symbols_list);
+	while(sym)
+	{
+		struct Node *node;
+        if (node = IListBrowser->AllocListBrowserNode(1,
+        										LBNA_UserData, sym,
                                                 LBNA_Column, 0,
-                                                LBNCA_Text, f->name,
+                                                	LBNCA_CopyText, TRUE,
+                                                	LBNCA_Text, sym->name,
                                                 TAG_DONE))
                                     {
-                                        IExec->AddTail(&breakpointslist, node);
-                                       	breakpointslist_isempty = FALSE;
+                                        IExec->AddTail(&bp_symbolslist, node);
                                     }
-        f = (struct stab_function *)IExec->GetSucc ((struct Node *)f);
-    }
+		sym = (struct amigaos_symbol *)IExec->GetSucc((struct Node *)sym);
+	}
+	IIntuition->SetGadgetAttrs((struct Gadget *)BPSymbolsListBrowserObj, breakpointswin, NULL,
+												LISTBROWSER_Labels, &bp_symbolslist,
+												TAG_END);
 }
 
-void breakpoints_freelist()
-{
-    if (IsListEmpty(&breakpointslist))
-    {
-        IListBrowser->FreeListBrowserList(&breakpointslist);
-    }
-}
-
+#define SPACE LAYOUT_AddChild, SpaceObject, End
 
 void breakpoints_open_window()
 {
     if (breakpointswin)
         return;
-        
-    breakpoints_makelist();
 
-    breakpointscolumninfo = IListBrowser->AllocLBColumnInfo(1,
-        LBCIA_Column, 0,
-            LBCIA_Title, "Functions",
-            //LBCIA_Weight, 35,
-            //LBCIA_Sortable, TRUE,
-            //LBCIA_AutoSort, TRUE,
-            //LBCIA_SortArrow, TRUE,
-        TAG_DONE);
-        
+	IExec->NewList(&bp_breakpointslist);
+	IExec->NewList(&bp_symbolslist);
+   
     /* Create the window object. */
-    if(( BreakpointsWinObj = WindowObject,
+    if(( BPWinObj = WindowObject,
             WA_ScreenTitle, "Debug 101",
             WA_Title, "Select breakpoint",
-            WA_Width, 400,
+            WA_Width, 600,
             WA_Height, 400,
             WA_DepthGadget, TRUE,
             WA_SizeGadget, TRUE,
@@ -144,32 +167,92 @@ void breakpoints_open_window()
                 LAYOUT_SpaceOuter, TRUE,
                 LAYOUT_DeferLayout, TRUE,
                 
-                LAYOUT_AddChild, BreakpointsListBrowserObj = ListBrowserObject,
-                    GA_ID,                     BREAKPOINTS_LISTBROWSER,
-                    GA_RelVerify,              TRUE,
-                    GA_TabCycle,               TRUE,
-                    LISTBROWSER_AutoFit,       TRUE,
-                    LISTBROWSER_Labels,        &breakpointslist,
-                    LISTBROWSER_ColumnInfo,    breakpointscolumninfo,
-                    LISTBROWSER_AutoFit,       TRUE,
-                    LISTBROWSER_ColumnTitles,  TRUE,
-                    LISTBROWSER_ShowSelected,  TRUE,
-                    LISTBROWSER_Striping,      LBS_ROWS,
-                    LISTBROWSER_SortColumn,     0,
-                    LISTBROWSER_TitleClickable, TRUE,
-                ListBrowserEnd,
+                LAYOUT_AddChild, HLayoutObject,
+                	LAYOUT_AddChild, BPSymbolsListBrowserObj = ListBrowserObject,
+                    	GA_ID,                     BP_SYMBOLS_LISTBROWSER,
+                    	GA_RelVerify,              TRUE,
+                    	GA_TabCycle,               TRUE,
+                    	LISTBROWSER_AutoFit,       TRUE,
+                    	LISTBROWSER_Labels,        &bp_symbolslist,
+	                    LISTBROWSER_ShowSelected,  TRUE,
+    	                LISTBROWSER_Striping,      LBS_ROWS,
+	                ListBrowserEnd,
+	           		
+	           		LAYOUT_AddChild, HLayoutObject,
+	           			SPACE,
+	           			
+		           		LAYOUT_AddChild, VLayoutObject,
+		           			SPACE,
+	           			
+			           		LAYOUT_AddChild, BPSymbolAddButtonObj = ButtonObject,
+		    	       			GA_ID, BP_SYMBOL_ADD_BUTTON,
+	    	    	            GA_RelVerify, TRUE,
+    	    	    	        GA_Text, "Add",
+							ButtonEnd,
+                			CHILD_WeightedHeight, 0,
+                			CHILD_WeightedWidth, 0,
+                		
+                			SPACE,
+                		EndMember,
+                		SPACE,
+                	EndMember,
+               		CHILD_WeightedWidth, 0,
+
+               	  	LAYOUT_AddChild, VLayoutObject,
+                		LAYOUT_AddChild, BPBreakpointsListBrowserObj = ListBrowserObject,
+                    		GA_ID,                     BP_BREAKPOINTS_LISTBROWSER,
+                    		GA_RelVerify,              TRUE,
+                    		GA_TabCycle,               TRUE,
+                    		LISTBROWSER_AutoFit,       TRUE,
+                    		LISTBROWSER_Labels,        &bp_breakpointslist,
+                    		LISTBROWSER_ShowSelected,  TRUE,
+                    		LISTBROWSER_Striping,      LBS_ROWS,
+	                	ListBrowserEnd,
+	                	
+	                	LAYOUT_AddChild, BPRemoveButtonObj = ButtonObject,
+	                		GA_ID, BP_REMOVE_BUTTON,
+                    		GA_RelVerify, TRUE,
+                    		GA_Text, "Remove",
+                		ButtonEnd,
+                		CHILD_WeightedHeight, 0,
+	                	ButtonEnd,
+                EndMember,
                 
-                LAYOUT_AddChild, BreakpointsButtonObj = ButtonObject,
-                    GA_ID, BREAKPOINTS_BUTTON,
-                    GA_RelVerify, TRUE,
-                    GA_Text, "Select",
-                ButtonEnd,
+                LAYOUT_AddChild, HLayoutObject,
+                	LAYOUT_AddChild, BPAddressStringObj = StringObject,
+						GA_ID, BP_ADDRESS_STRING,
+						GA_RelVerify, TRUE,
+						STRINGA_MinVisible,	9,
+						STRINGA_MaxChars,	9,
+						STRINGA_Buffer,		bp_address_buffer,
+						STRINGA_HookType,	SHK_HEXADECIMAL,
+                	StringEnd,
+					CHILD_WeightedHeight, 0,
+					CHILD_Label, LabelObject, LABEL_Text, "Address:", LabelEnd,
+
+                	LAYOUT_AddChild, BPRemoveButtonObj = ButtonObject,
+	                	GA_ID, BP_ADDRESS_ADD_BUTTON,
+                    	GA_RelVerify, TRUE,
+                    	GA_Text, "Add",
+                	ButtonEnd,
+                	CHILD_WeightedHeight, 0,
+                	
+	                LAYOUT_AddChild, BPDoneButtonObj = ButtonObject,
+    	                GA_ID, BP_DONE_BUTTON,
+        	            GA_RelVerify, TRUE,
+            	        GA_Text, "Done",
+                	ButtonEnd,
+                	CHILD_WeightedHeight, 0,
+                EndMember,
                 CHILD_WeightedHeight, 0,
             EndGroup,
         EndWindow))
     {
         /*  Open the window. */
-        breakpointswin = (struct Window *) RA_OpenWindow(BreakpointsWinObj);
+        breakpointswin = (struct Window *) RA_OpenWindow(BPWinObj);
+
+		breakpoints_makebplist();
+		breakpoints_makesymbollist();
     }
 }
 
@@ -178,7 +261,7 @@ uint32 breakpoints_obtain_window_signal()
 {
     uint32 signal = 0x0;
     if (breakpointswin)
-        IIntuition->GetAttr( WINDOW_SigMask, BreakpointsWinObj, &signal );
+        IIntuition->GetAttr( WINDOW_SigMask, BPWinObj, &signal );
         
     return signal;
 }
@@ -191,14 +274,13 @@ void breakpoints_event_handler()
     BOOL done = FALSE;
     WORD Code;
     CONST_STRPTR hintinfo;
-    uint32 selected;
     struct stab_function *f;
     
     /* Obtain the window wait signal mask. */
     //IIntuition->GetAttr( WINDOW_SigMask, WinObj, &signal );
     
     /* Input Event Loop */
-    while ((result = RA_HandleInput(BreakpointsWinObj, &Code)) != WMHI_LASTMSG)
+    while ((result = RA_HandleInput(BPWinObj, &Code)) != WMHI_LASTMSG)
     {
         switch (result & WMHI_CLASSMASK)
         {
@@ -208,34 +290,55 @@ void breakpoints_event_handler()
              case WMHI_GADGETUP:
                 switch(result & WMHI_GADGETMASK)
                 {
-                    case BREAKPOINTS_LISTBROWSER:
-                        IIntuition->GetAttrs( BreakpointsListBrowserObj, LISTBROWSER_RelEvent, &relevent, TAG_DONE );
-                        if( relevent != LBRE_DOUBLECLICK )
-                            break;
-                            
-                        /* intentional fall-through */
-                    case BREAKPOINTS_BUTTON:
-                        /* if the user has entered a new text for the buttons
-                        ** help text, get it, and set it
-                        */
-                        if(!breakpointslist_isempty)
-                        {
-	                        IIntuition->GetAttrs( BreakpointsListBrowserObj,
-    	                                    LISTBROWSER_Selected, &selected, TAG_DONE );
-                                        
-        	                if (selected != 0x7fffffff)
-            	            {
-                	            f = breakpoints_get_selected_function(selected);
-                            
-                    	        if (f)
-                        	    {
-                            	    pause();
-                                	insert_breakpoint (f->address, BR_NORMAL);
-                            	}
-                        	}
-                        }
-                        done = TRUE;
-                        break;
+					case BP_SYMBOL_ADD_BUTTON:
+					{
+						struct Node *node;
+						struct amigaos_symbol *s;
+						IIntuition->GetAttr(LISTBROWSER_SelectedNode, BPSymbolsListBrowserObj, (ULONG *) &node);
+						if(!node)
+							return;
+						IListBrowser->GetListBrowserNodeAttrs(node, LBNA_UserData, &s, TAG_DONE);
+						if(s)
+						{
+							insert_breakpoint(s->value, BR_NORMAL_SYMBOL, (APTR)s, 0);
+							breakpoints_makebplist();
+						}
+					}
+					break;
+						
+					case BP_ADDRESS_ADD_BUTTON:
+					case BP_ADDRESS_STRING:
+					{
+						uint32 addr;
+						sscanf(bp_address_buffer, "%x", &addr);
+						if(addr)
+						{
+							insert_breakpoint(addr, BR_NORMAL_ABSOLUTE, NULL, 0);
+							breakpoints_makebplist();
+						}
+					}
+					break;
+					
+					case BP_REMOVE_BUTTON:
+					{
+						struct Node *node;
+						IIntuition->GetAttr(LISTBROWSER_SelectedNode, BPBreakpointsListBrowserObj, (ULONG *) &node);
+						if(node)
+						{
+							struct breakpoint *br;
+							IListBrowser->GetListBrowserNodeAttrs(node, LBNA_UserData, &br, TAG_DONE);
+							if(br)
+							{
+								remove_breakpoint_node(br);
+								breakpoints_makebplist();
+							}
+						}
+					}
+					break;
+											
+					case BP_DONE_BUTTON:
+	                    done = TRUE;
+    	                break;
                 }
                 break;
         }
@@ -256,11 +359,12 @@ void breakpoints_close_window()
          * already opened and it will dispose of
          * all objects attached to it.
          */
-        IIntuition->DisposeObject( BreakpointsWinObj );
-        
-        IListBrowser->FreeLBColumnInfo( breakpointscolumninfo );
-        
-        breakpoints_freelist();
+        IIntuition->DisposeObject( BPWinObj );
+	    if (!IsListEmpty(&bp_breakpointslist))
+    	    IListBrowser->FreeListBrowserList(&bp_breakpointslist);
+	    if (!IsListEmpty(&bp_symbolslist))
+    	    IListBrowser->FreeListBrowserList(&bp_symbolslist);
+
         breakpointswin = NULL;
     }
 }

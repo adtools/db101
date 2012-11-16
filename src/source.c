@@ -10,6 +10,7 @@
 #include "console.h"
 #include "stabs.h"
 #include "gui.h"
+#include "breakpoints.h"
 
 struct List source_list;
 Object *SourceListBrowserObj;
@@ -32,7 +33,7 @@ void source_init()
             LBCIA_Title, "Br",
             LBCIA_DraggableSeparator, TRUE,
         LBCIA_Column, 1,
-            LBCIA_Title, "l        ",
+            LBCIA_Title, "line",
             LBCIA_DraggableSeparator, TRUE,
         LBCIA_Column, 2,
         	LBCIA_Title, "",
@@ -95,16 +96,27 @@ char *source_convert_string(char *str)
 	return ret;
 }
 
+typedef struct /* lb_userdata */
+{
+   uint32 sline;
+   int32 nline;
+   struct stab_function *func;
+} lb_userdata;
+
 void source_load_file(char *name)
 {
+	source_clear();
+	
 	char buffer[1024];
 	char linebuf[64];
 
-	char *sourcename = current_function->sourcename;
+	char *sourcename;
 	char *realname;
 	int u = 0;
-	if((u=__unix_to_amiga_path_name(sourcename, &realname)) == 1)
+	if((u=__unix_to_amiga_path_name(name, &realname)) == 1)
 		sourcename = realname;
+	else
+		sourcename = name;
 
 	char fullpath[1024];
 	if (strlen (sourcename) == 0)
@@ -120,43 +132,114 @@ void source_load_file(char *name)
 	if(fd)
 	{
 		IIntuition->SetAttrs(SourceListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
-		int line = 1;
+		int sline = 1;
 		while(1)
 		{
 			if(fgets(buffer, 1024, fd) != buffer)
 				break;
+
+			uint32 nline;
+			struct stab_function *f;
+			BOOL box = FALSE, check = FALSE;
 			
+	        if((f = stabs_sline_to_nline(name, sline, &nline)) != 0 )
+    	    {
+        	    box = TRUE;
+            	check = is_breakpoint_at(f->address + f->lines[nline]);
+         	}
+         	else
+            	box = FALSE;
+
+         	lb_userdata *lbnode = freemem_malloc(source_freemem_hook, sizeof(lb_userdata));
+    	    if( lbnode )
+	        {
+        		lbnode->sline = sline;
+				lbnode->nline = nline;
+				lbnode->func = f;
+			}
+
 			struct Node *node;
 			char *str = source_convert_string(buffer);
-			sprintf(linebuf, "%d", line);
-			char *lstr = freemem_strdup (source_freemem_hook, linebuf);
 			if (node = IListBrowser->AllocListBrowserNode(3,
+												LBNA_CheckBox, box,
+												box ? LBNA_Checked : TAG_SKIP, check,
+												LBNA_UserData, lbnode,
 												LBNA_Column, 1,
-												LBNCA_Text,  lstr,
+													LBNCA_HorizJustify, LCJ_RIGHT,
+													LBNCA_CopyInteger, TRUE,
+													LBNCA_Integer, &sline,
             									LBNA_Column, 2,
-                								LBNCA_Text, str,
+                									LBNCA_Text, str,
             									TAG_DONE))
         							{
 							            IExec->AddTail(&source_list, node);
 									}
-			line++;	
+			sline++;	
 		}
 		fclose(fd);
 		IIntuition->SetGadgetAttrs((struct Gadget *)SourceListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &source_list, TAG_END);
+		strcpy(currentfile, name);
 	}
+	else
+		console_printf(OUTPUT_WARNING, "Failed to open source file %s", name);
+}
+
+void source_show_currentline()
+{
+	if(current_function && strcmp(currentfile, current_function->sourcename) == 0)
+	{
+		int line = current_function->lineinfile[current_function->currentline];
+	
+		IIntuition->SetGadgetAttrs((struct Gadget *)SourceListBrowserObj, mainwin, NULL,
+													LISTBROWSER_Selected, line-1,
+													LISTBROWSER_MakeVisible, line-1,
+													TAG_END);
+	}
+}
+
+void source_handle_input()
+{
+	uint32 event, checked = 0, sline = 0, nline, sel;
+	struct Node *node = NULL;
+	lb_userdata *lbnode;
+	struct stab_function *f;
+
+	IIntuition->GetAttr(LISTBROWSER_SelectedNode, SourceListBrowserObj, (ULONG *) &node);
+	if(!node)
+		return;
+	IIntuition->GetAttrs(SourceListBrowserObj, LISTBROWSER_RelEvent, &event, TAG_DONE);
+	
+	switch( event )
+	{
+		case LBRE_CHECKED:
+		case LBRE_UNCHECKED:
+
+			checked = ((event & LBRE_CHECKED) ? TRUE : FALSE);
+
+			IListBrowser->GetListBrowserNodeAttrs( node,
+                                                LBNA_Checked, &checked,
+                                                LBNA_UserData, &lbnode,
+                                                TAG_DONE);
+			sline = lbnode->sline;
+			nline = lbnode->nline;
+			f = lbnode->func;
+			//f = stabs_sline_to_nline(currentfile, sline, &nline);
+
+			if(f)
+			{
+				if(checked)
+					insert_breakpoint(f->address + f->lines[nline], BR_NORMAL_FUNCTION, (APTR)f, sline);
+				else
+					remove_breakpoint(f->address + f->lines[nline]);
+			}
+		break;
+	}
+	source_show_currentline();
 }
 
 void source_update()
 {
 	if(strcmp(currentfile, current_function->sourcename) != 0)
-	{
 		source_load_file(current_function->sourcename);
-		strcpy(currentfile, current_function->sourcename);
-	}
-	int line = current_function->lineinfile[current_function->currentline];
-	
-	IIntuition->SetGadgetAttrs((struct Gadget *)SourceListBrowserObj, mainwin, NULL,
-													LISTBROWSER_Selected, line-1,
-													LISTBROWSER_MakeVisible, line-1,
-													TAG_END);
+	source_show_currentline();
 }

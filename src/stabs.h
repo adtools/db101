@@ -15,9 +15,14 @@ struct stab_function
 	uint32 size;
 	char *sourcename;
 	uint32 numberoflines;
-	uint32 lines[1024];      //list of addresses relative to funtion address
-	uint32 lineinfile[1024];
-	uint32 linetype[1024];
+	struct sline {
+		uint32 adr;      //list of addresses relative to funtion address
+		uint32 infile;
+		uint32 type;
+	} *line;
+	//uint32 lines[1024];      //list of addresses relative to funtion address
+	//uint32 lineinfile[1024];
+	//uint32 linetype[1024];
 	uint32 currentline;
 	struct List symbols;
 	struct List params;

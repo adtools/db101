@@ -145,7 +145,7 @@ void source_load_file(char *name)
 	        if((f = stabs_sline_to_nline(name, sline, &nline)) != 0 )
     	    {
         	    box = TRUE;
-            	check = is_breakpoint_at(f->address + f->lines[nline]);
+            	check = is_breakpoint_at(f->address + f->line[nline].adr);
          	}
          	else
             	box = FALSE;
@@ -188,7 +188,7 @@ void source_show_currentline()
 {
 	if(current_function && strcmp(currentfile, current_function->sourcename) == 0)
 	{
-		int line = current_function->lineinfile[current_function->currentline];
+		int line = current_function->line[current_function->currentline].infile;
 	
 		IIntuition->SetGadgetAttrs((struct Gadget *)SourceListBrowserObj, mainwin, NULL,
 													LISTBROWSER_Selected, line-1,
@@ -228,9 +228,9 @@ void source_handle_input()
 			if(f)
 			{
 				if(checked)
-					insert_breakpoint(f->address + f->lines[nline], BR_NORMAL_FUNCTION, (APTR)f, sline);
+					insert_breakpoint(f->address + f->line[nline].adr, BR_NORMAL_FUNCTION, (APTR)f, sline);
 				else
-					remove_breakpoint(f->address + f->lines[nline]);
+					remove_breakpoint(f->address + f->line[nline].adr);
 			}
 		break;
 	}

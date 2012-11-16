@@ -101,7 +101,7 @@ Object *SourcelistListBrowserObj;
 extern Object *VariablesListBrowserObj, *StacktraceListBrowserObj, *DisassemblerListBrowserObj, *ConsoleListBrowserObj, *SourceListBrowserObj;
 extern Object *DisassemblerStepButtonObj, *DisassemblerSkipButtonObj;
 
-char lastdir[1024] = "qt:examples/widgets/calculator"; //work:code/medium/StangTennis2D"; "src"; 
+char lastdir[1024] = "src"; //work:code/medium/StangTennis2D";  "qt:examples/widgets/calculator"; 
 char filename[1024] = "";
 char childpath[1024] = "";
 
@@ -573,7 +573,7 @@ void event_loop()
 							if (nline != -1)
 							{
 								current_function->currentline = nline;
-								output_lineinfile (current_function->lineinfile[current_function->currentline]);
+								//output_lineinfile (current_function->lineinfile[current_function->currentline]);
 								source_update();
 							}
 							else

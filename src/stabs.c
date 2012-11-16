@@ -38,7 +38,7 @@ struct stab_function *stabs_sline_to_nline(char *sourcename, uint32 sline, uint3
 		{
 			for( i = 0; i < f->numberoflines; i++)
 			{
-				if( f->lineinfile[i] == sline )
+				if( f->line[i].infile == sline )
 				{
 					*nline = i;
 					return f;
@@ -171,6 +171,7 @@ void stabs_interpret_functions ()
 				IExec->NewList (&(f->symbols));
 				IExec->NewList(&f->params);
 				BOOL done = FALSE;
+				f->line = 0;
 
 				while (! done )
 				{
@@ -199,14 +200,21 @@ void stabs_interpret_functions ()
 						break;
 
 					case N_SLINE:
-						f->lines[f->numberoflines] = sym->n_value;
-						f->lineinfile[f->numberoflines] = sym->n_desc;
+						f->line = (struct sline *)realloc(f->line, sizeof(struct sline) * (f->numberoflines + 1));
+						if( !f->line )
+						{
+							printf("Out of memory! (N_SLINE %ld)\n", f->numberoflines);
+							done = TRUE;
+							break;
+						}
+						f->line[f->numberoflines].adr = sym->n_value;
+						f->line[f->numberoflines].infile = sym->n_desc;
 						if (line > sym->n_desc)
-							f->linetype[f->numberoflines] = LINE_LOOP;
+							f->line[f->numberoflines].type = LINE_LOOP;
 						else
 						{
 							size = sym->n_value+4;
-							f->linetype[f->numberoflines] = LINE_NORMAL;
+							f->line[f->numberoflines].type = LINE_NORMAL;
 						}
 						f->numberoflines++;
 						line = sym->n_desc;

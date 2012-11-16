@@ -100,14 +100,14 @@ void insert_line_breakpoints()
 	struct stab_function *f = current_function;
 	uint32 i = f->currentline;
 
-	if (f->linetype[i] == LINE_LOOP)
+	if (f->line[i].type == LINE_LOOP)
 	{
-		uint32 newline = translate_sline_to_nline (f->lineinfile[i]);
-		insert_breakpoint (f->address + f->lines[newline+1], BR_LINE, NULL, 0);
-		insert_breakpoint (f->address + f->lines[i+1], BR_LINE, NULL, 0);
+		uint32 newline = translate_sline_to_nline (f->line[i].infile);
+		insert_breakpoint (f->address + f->line[newline+1].adr, BR_LINE, NULL, 0);
+		insert_breakpoint (f->address + f->line[i+1].adr, BR_LINE, NULL, 0);
 	}
 	else
-		insert_breakpoint (f->address + f->lines[i+1], BR_LINE, NULL, 0);
+		insert_breakpoint (f->address + f->line[i+1].adr, BR_LINE, NULL, 0);
 }
 
 void remove_line_breakpoints()
@@ -141,7 +141,7 @@ uint32 translate_sline_to_nline(uint32 sline)
 
 	int i;
 	for (i = 0; i < f->numberoflines; i++)
-		if (f->lineinfile[i] == sline)
+		if (f->line[i].infile == sline)
 			return i;
 }
 
@@ -153,7 +153,7 @@ int get_nline_from_address(uint32 addr)
 	struct stab_function *f = current_function;
 	int i;
 	for (i=0; i < f->numberoflines; i++)
-		if (f->address + f->lines[i] == addr)
+		if (f->address + f->line[i].adr == addr)
 			return i;
 
 	return -1;
@@ -176,7 +176,7 @@ void guess_line_in_function ()
 	int i;
 	for (i=0; i < f->numberoflines-1; i++)
 	{
-		if ( ip >= f->address + f->lines[i] && ip < f->address + f->lines[i+1])
+		if ( ip >= f->address + f->line[i].adr && ip < f->address + f->line[i+1].adr)
 		{
 			f->currentline = i;
 			return;
@@ -192,7 +192,8 @@ BOOL breakpoint_line_in_file (uint32 sline, char *file)
 	struct stab_function *f = stabs_sline_to_nline(file, sline, &nline);
 	if(f)
 	{
-		insert_breakpoint (f->address + f->lines[nline], BR_NORMAL_FUNCTION, (APTR)f, sline);
+		printf("Inserting breakpoint: 0x%x (0x%x)\n");
+		insert_breakpoint (f->address + f->line[nline].adr, BR_NORMAL_FUNCTION, (APTR)f, sline);
 		return TRUE;
 	}
 	return FALSE;

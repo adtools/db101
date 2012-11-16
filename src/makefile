@@ -66,7 +66,7 @@ arexxport.o: arexxport.c arexxport.h suspend.h breakpoints.h gui.h
 console.o: console.c console.h freemem.h
 	$(CC) -c -gstabs -o console.o console.c
 
-source.o: source.c source.h freemem.h
+source.o: source.c source.h freemem.h stabs.h breakpoints.h
 	$(CC) -c -gstabs -o source.o source.c
 
 pipe.o: pipe.c pipe.h

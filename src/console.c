@@ -26,10 +26,10 @@ int16 console_pens[OUTPUT_NO_TYPES];
 uint32 console_colors[OUTPUT_NO_TYPES] =
 {
 	0xff000000,
-	0xffff0000,
-	0xff0000ff,
-	0xff00ff00,
-	0xffffff00
+	0xffaa0000,
+	0xff0000aa,
+	0xff00aa00,
+	0xffaaaa00
 };
 
 void console_init()

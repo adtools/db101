@@ -160,11 +160,11 @@ void stabs_interpret_functions ()
 				f->name = stabs_strdup_strip(&stabstr[sym->n_strx]);
 				f->address = sym->n_value;
 				if(includelevel && !soloverride)
-					f->sourcename = strdup(includename[includelevel-1]);
+					f->sourcename = freemem_strdup(stabs_freemem_hook, includename[includelevel-1]);
 				else if (soloverride)
-					f->sourcename = strdup(solname);
+					f->sourcename = freemem_strdup(stabs_freemem_hook, solname);
 				else
-					f->sourcename = strdup (sourcename);
+					f->sourcename = freemem_strdup(stabs_freemem_hook, sourcename);
 
 				f->currentline = 0;
 				f->numberoflines = 0;
@@ -253,7 +253,7 @@ void stabs_interpret_functions ()
 
 					case N_SOL:
 
-						solname = f->sourcename = strdup(&stabstr[sym->n_strx]);
+						solname = f->sourcename = freemem_strdup(stabs_freemem_hook, &stabstr[sym->n_strx]);
 						soloverride = TRUE;
 						break;
 						
@@ -770,7 +770,7 @@ void stabs_interpret_typedefs()
 			{
 				sourcefile = freemem_malloc(stabs_freemem_hook, sizeof (struct stab_sourcefile));
 
-				sourcefile->filename = strdup(&stabstr[sym->n_strx]);
+				sourcefile->filename = freemem_strdup(stabs_freemem_hook, &stabstr[sym->n_strx]);
 				IExec->NewList (&(sourcefile->typedef_list));
 				IExec->NewList (&(sourcefile->function_list));
 				IExec->NewList (&(sourcefile->unknown_list));

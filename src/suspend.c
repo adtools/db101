@@ -148,7 +148,7 @@ int amigaos_relocate_elfhandle ()
     		EAT_SectionStringTable, &strtblidx,
     		TAG_DONE)))
     {
-    	console_printf(OUTPUT_WARNING,"Cannot query elf handle\n");
+    	console_printf(OUTPUT_WARNING,"Cannot query elf handle");
     	return -1;
     }
 
@@ -175,7 +175,7 @@ int amigaos_relocate_elfhandle ()
 					GST_SectionIndex, i,
 					TAG_DONE);
 
-			console_printf(OUTPUT_SYSTEM, "Executable section (0x%x/%d bytes) starts at %p\n",(int)code_elf_addr,code_size,code_relocated_addr);
+			console_printf(OUTPUT_SYSTEM, "Executable section (0x%x/%d bytes) starts at %p",(int)code_elf_addr,code_size,code_relocated_addr);
 		}
 
 		/* If this is a rela section, relocate the related section */
@@ -193,14 +193,14 @@ int amigaos_relocate_elfhandle ()
 			 */
 			if (pRefHeader && !(pRefHeader->sh_flags & SWF_ALLOC))
 			{
-				console_printf(OUTPUT_SYSTEM, "Relocating section \"%s\" (index %d) which is referred by section \"%s\" (index %d)\n",
+				console_printf(OUTPUT_SYSTEM, "Relocating section \"%s\" (index %d) which is referred by section \"%s\" (index %d)",
 						&strtbl[pRefHeader->sh_name], pHeader->sh_info,
 						&strtbl[pHeader->sh_name],i);
 				tags[0].ti_Data = pHeader->sh_info;
 
 				if (!IElf->RelocateSection(hElf, tags))
 				{
-					console_printf(OUTPUT_WARNING,"Section %s (index %d) could not been relocated.\n",&strtbl[pRefHeader->sh_name],(int)pHeader->sh_info);
+					console_printf(OUTPUT_WARNING,"Section %s (index %d) could not been relocated.",&strtbl[pRefHeader->sh_name],(int)pHeader->sh_info);
 				}
 
 			}
@@ -246,7 +246,7 @@ amigaos_attach (struct Process *aprocess)
     //dprintf("Process state: %d\n",pProcess->pr_Task.tc_State);
     if (process->pr_Task.tc_State == TS_READY || process->pr_Task.tc_State == TS_WAIT)
     {
-		printf("Suspending task %p\n", process);
+		console_printf(OUTPUT_SYSTEM, "Suspending task %p", process);
 		IExec->SuspendTask((struct Task *)process, 0);
     }
 
@@ -270,10 +270,7 @@ amigaos_attach (struct Process *aprocess)
 		killtask();
 		return FALSE;
 	}
-
-
 	return TRUE;
-
 }
 
 
@@ -284,11 +281,11 @@ int load_inferior(char *filename, char *path, char *args)
 
 	char fullpath[1024];
 
-console_printf(OUTPUT_SYSTEM, "Trying lock on %s", path);
+	console_printf(OUTPUT_SYSTEM, "Attempting to load %s in %s", filename, path);
 	BPTR lock = IDOS->Lock (path, SHARED_LOCK);
 	if (!lock)
 	{
-		console_printf(OUTPUT_WARNING, "Coudln't get currentdir lock\n");
+		console_printf(OUTPUT_WARNING, "Coudln't get currentdir lock");
 		return -1;
 	}
 	BPTR homelock = IDOS->DupLock (lock);
@@ -306,7 +303,7 @@ console_printf(OUTPUT_SYSTEM, "Trying lock on %s", path);
 	
     if (exec_seglist == 0L)
 	{
-		console_printf (OUTPUT_WARNING, "\"%s\": not an executable file\n", filename);
+		console_printf (OUTPUT_WARNING, "\"%s\": not an executable file", filename);
 		IDOS->UnLock(lock);
 		return -1;
 	}
@@ -341,7 +338,7 @@ console_printf(OUTPUT_SYSTEM, "Trying lock on %s", path);
 	{
 		IExec->Permit();
 		task_exists = FALSE;
-		console_printf(OUTPUT_WARNING, "Couldn't start new task\n");
+		console_printf(OUTPUT_WARNING, "Couldn't start new task!");
 		ret = -1;
 	}
 	else
@@ -380,7 +377,7 @@ void play()
 			IExec->RestartTask((struct Task *)process, 0L);
 			if (process->pr_Task.tc_State == TS_SUSPENDED)
 			{
-				console_printf(OUTPUT_WARNING, "Failed to restart task!\n");
+				console_printf(OUTPUT_WARNING, "Failed to restart task!");
 				//IExec->RemTask (newtask);
 			}
 		}
@@ -406,7 +403,7 @@ void step()
 
 	insert_line_breakpoints();
 
-	if (is_breakpoint_at(context_copy.ip) && !(f->linetype[f->currentline] == LINE_LOOP))
+	if (is_breakpoint_at(context_copy.ip) && !(f->line[f->currentline].type == LINE_LOOP))
 	{
 		should_continue = TRUE;
 		asmstep();

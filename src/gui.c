@@ -622,11 +622,11 @@ void event_loop()
 					stabs_free_stabs();
 					free_breakpoints();
 
-					//globals_close_window();
-					//registers_close_window();
 					hex_close_window();
-					//disassembler_close_window();
-					//locals_close_window();
+					locals_clear();
+					source_clear();
+					sourcelist_clear();
+					stacktrace_clear();
 
 					console_printf(OUTPUT_SYSTEM, "Program has ended");
 				}
@@ -785,6 +785,7 @@ void main_load(char *name, char *path, char *args)
 														STRINGA_TextVal, name,
 														TAG_DONE);
 		sourcelist_update();
+		sourcelist_show_main();
 	}
 }
 

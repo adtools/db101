@@ -21,7 +21,7 @@ helloworld: helloworld.c helloworld2.c
 	$(CC) -gstabs helloworld.c helloworld2.c -o helloworld
 	$(CC) -gstabs -S helloworld.c
 
-suspend.o: suspend.c suspend.h symbols.h gui.h breakpoints.h
+suspend.o: suspend.c suspend.h symbols.h gui.h breakpoints.h stabs.h
 	$(CC) -c -gstabs -o suspend.o suspend.c
 
 symbols.o: symbols.c symbols.h suspend.h stabs.h

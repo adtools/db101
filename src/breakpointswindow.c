@@ -1,4 +1,4 @@
-/*symbols.c*/
+/*breakpointswindow.c*/
 
 
 #include <exec/types.h>
@@ -12,10 +12,9 @@
 #include <proto/layout.h>
 #include <proto/label.h>
 #include <proto/listbrowser.h>
-#include <proto/asl.h>
+//#include <proto/asl.h>
 #include <proto/elf.h>
 #include <proto/space.h>
-#include <proto/string.h>
 
 #include <classes/window.h>
 #include <gadgets/button.h>
@@ -26,8 +25,8 @@
 
 #include <reaction/reaction_macros.h>
 
-#include <libraries/asl.h>
-#include <interfaces/asl.h>
+//#include <libraries/asl.h>
+//#include <interfaces/asl.h>
 
 #include <libraries/elf.h>
 
@@ -275,10 +274,7 @@ void breakpoints_event_handler()
     WORD Code;
     CONST_STRPTR hintinfo;
     struct stab_function *f;
-    
-    /* Obtain the window wait signal mask. */
-    //IIntuition->GetAttr( WINDOW_SigMask, WinObj, &signal );
-    
+
     /* Input Event Loop */
     while ((result = RA_HandleInput(BPWinObj, &Code)) != WMHI_LASTMSG)
     {

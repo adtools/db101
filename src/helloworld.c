@@ -1,4 +1,5 @@
-//#include <proto/dos.h>
+#include <proto/exec.h>
+#include <proto/dos.h>
 
 #include <stdio.h>
 
@@ -19,7 +20,7 @@ struct hellostruct
 
 enum helloenum
 {
-	ZERO,
+	SUBZERO,
 	ONE,
 	TWO,
 	INFINIT
@@ -76,6 +77,10 @@ int main()
 	}
 
 	//printf("main: a = %d\n", a);
+
+	printf("Waiting for signal...\n");
+	IExec->Wait(SIGBREAKF_CTRL_C);
+	printf("Got it!\n");
 
 	printf("Goodbye world!\n");
 	

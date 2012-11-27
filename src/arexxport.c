@@ -163,6 +163,8 @@ STATIC VOID rexx_Name (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)
 {
 	/* return the program name. */
 	ac->ac_Result = "Debug 101";
+	console_printf(OUTPUT_AREXX, "Program name: db101");
+	console_printf(OUTPUT_AREXX, "Arexx Port: AREXXDB101");
 }
 
 STATIC VOID rexx_Play (struct ARexxCmd *ac, struct RexxMsg *rxm UNUSED)

@@ -31,6 +31,9 @@
 #include "breakpoints.h"
 #include "console.h"
 #include "pipe.h"
+#include "setbreak.h"
+
+#define dprintf(format...)	IExec->DebugPrintF(format)
 
 struct DebugIFace *IDebug = 0;
 struct MMUIFace *IMMU = 0;
@@ -44,8 +47,6 @@ struct KernelDebugMessage
 		struct Library *library;
 	} message;
 };
-
-#define    MSR_TRACE_ENABLE           0x00000400
 
 static ULONG amigaos_debug_callback(struct Hook *, struct Task *, struct KernelDebugMessage *);
 
@@ -73,7 +74,8 @@ BOOL task_exists = FALSE;
 BOOL task_playing = FALSE;
 BOOL wants_to_crash = FALSE;
 BOOL should_continue = FALSE;
-BOOL entering_function = FALSE;
+BOOL catch_sline = FALSE;
+
 
 void init()
 {
@@ -260,6 +262,9 @@ amigaos_attach (struct Process *aprocess)
 
 	attach_hook();
 
+	IDebug->ReadTaskContext((struct Task *)process, &context_copy, RTCF_ALL);
+	IExec->Signal((struct Task *)me, debug_sigfield);
+
 	if (open_elfhandle() == 0)
 	{
 		killtask();
@@ -347,7 +352,10 @@ int load_inferior(char *filename, char *path, char *args)
 		task_exists = TRUE;
 		task_playing = FALSE;
 		attach_hook();
+		IDebug->ReadTaskContext((struct Task *)process, &context_copy, RTCF_ALL);
 		IExec->Permit();
+		//doesn't work at the moment:
+		//IExec->Signal((struct Task *)me, debug_sigfield);
 		//printf("New task started...\n");
 		ret = 0;
 	}
@@ -366,21 +374,33 @@ int load_inferior(char *filename, char *path, char *args)
 	return ret;
 }
 
-void play()
+BOOL play()
 {
 	if (task_exists)
-		if (!task_playing)
+	{
+	UBYTE state = process->pr_Task.tc_State;
+		if (state != TS_READY)
 		{
-			task_playing = TRUE;
-			entering_function = TRUE;
-
+			if(state == TS_CRASHED)
+				process->pr_Task.tc_State = TS_READY;
+			IExec->Forbid();
 			IExec->RestartTask((struct Task *)process, 0L);
-			if (process->pr_Task.tc_State == TS_SUSPENDED)
+			if (process->pr_Task.tc_State == TS_SUSPENDED || process->pr_Task.tc_State == TS_CRASHED)
 			{
+				IExec->Permit();
 				console_printf(OUTPUT_WARNING, "Failed to restart task!");
 				//IExec->RemTask (newtask);
+				return FALSE;
+			}
+			else
+			{
+				IExec->Permit();
+				task_playing = TRUE;
+				return TRUE;
 			}
 		}
+	}
+	return FALSE;
 }
 
 void pause()
@@ -415,7 +435,11 @@ void step()
 	}
 }
 
-
+void into()
+{
+	catch_sline = TRUE;
+	asmstep();
+}
 
 void asmstep()
 {
@@ -425,15 +449,9 @@ void asmstep()
 			pause();
 
 		context_ptr->ip = context_copy.ip;
-//printf("asmstep() context_ptr->ip = 0x%08x\n", context_ptr->ip);
-IDOS->Delay(2);
-		//should work, but doesn't:
-		//context_ptr->msr |= MSR_TRACE_ENABLE;
-		//this is just a bad hack:
+
 		asmstep_install();
 
-//printf("asmstep() 2: context_ptr->ip = 0x%08x\n", context_ptr->ip);
-IDOS->Delay(2);
 		play();
 	}
 }
@@ -445,12 +463,15 @@ void asmskip()
 		pause();
 
 		context_copy.ip += 4;
-		context_ptr->ip = context_copy.ip;
-
-		disassembler_makelist();
+		//context_ptr->ip = context_copy.ip;
+		IDebug->WriteTaskContext((struct Task *)process, &context_copy, RTCF_STATE);
 	}
 }
 
+void read_task_context()
+{
+	IDebug->ReadTaskContext((struct Task *)process, &context_copy, RTCF_ALL);
+}
 
 void killtask()
 {
@@ -468,8 +489,6 @@ void killtask()
 		task_playing = FALSE;
 	}
 }
-
-//struct ExceptionContext *context_ptr;
 
 
 void crash()
@@ -563,15 +582,15 @@ int memory_insert_breakpoint(uint32 addr, uint32 *buffer)
   {
   	/* Go supervisor */
 	stack = IExec->SuperState();
-	
 
   	/* Make sure to unprotect the memory area */
 	oldAttr = IMMU->GetMemoryAttrs((APTR)addr, 0);
 	IMMU->SetMemoryAttrs((APTR)addr, 4, MEMATTRF_READ_WRITE);
 
-		*buffer = *(uint32 *)addr;
-
-		*(uint32 *)addr = meth_start;	//insert asm("trap")
+		//*buffer = *(uint32 *)addr;
+		//*(uint32 *)addr = meth_start;	//insert asm("trap")
+		//dprintf("buffer: 0x%x meth_start: 0x%x addr:0x%x\n", *buffer, meth_start, addr);
+		*buffer = setbreak(addr, meth_start);
 
 	/* Set old attributes again */
 	IMMU->SetMemoryAttrs((APTR)addr, 4, oldAttr);
@@ -596,16 +615,20 @@ int memory_remove_breakpoint(uint32 addr, uint32 *buffer)
   {
   	/* Go supervisor */
 	stack = IExec->SuperState();
-	
+
+	IExec->Forbid();	
   	/* Make sure to unprotect the memory area */
 	oldAttr = IMMU->GetMemoryAttrs((APTR)addr, 0);
 	IMMU->SetMemoryAttrs((APTR)addr, 4, MEMATTRF_READ_WRITE);
 	
-		*(uint32 *)addr = *buffer;	//restore old instruction
+		//*(uint32 *)addr = *buffer;	//restore old instruction
+	uint32 realaddr = IMMU->GetPhysicalAddress(addr);
+	setbreak(realaddr, *buffer);
 
 	/* Set old attributes again */
 	IMMU->SetMemoryAttrs((APTR)addr, 4, oldAttr);
-	
+
+	IExec->Permit();	
 	/* Return to old state */
 	if (stack)
 		IExec->UserState(stack);

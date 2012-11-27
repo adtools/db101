@@ -22,12 +22,12 @@ helloworld: helloworld.c helloworld2.c
 	$(CC) -gstabs -S helloworld.c
 
 suspend.o: suspend.c suspend.h symbols.h gui.h breakpoints.h stabs.h
-	$(CC) -c -gstabs -o suspend.o suspend.c
+	$(CC) -c -gstabs -o suspend.o -Wa,-mregnames suspend.c
 
 symbols.o: symbols.c symbols.h suspend.h stabs.h
 	$(CC) -c -gstabs -o symbols.o symbols.c
 
-gui.o: gui.c gui.h suspend.h stabs.h symbols.h variables.h disassembler.h breakpoints.h stacktrace.h freemem.h unix.h
+gui.o: gui.c gui.h suspend.h stabs.h symbols.h variables.h disassembler.h breakpoints.h stacktrace.h freemem.h unix.h signalswindow.h
 	$(CC) -c -gstabs -o gui.o gui.c
 
 hexview.o: hexview.c hexview.h suspend.h symbols.h freemem.h
@@ -78,14 +78,21 @@ async.o: async.c async.h
 sourcelist.o: sourcelist.c sourcelist.h
 	$(CC) -c -gstabs -o sourcelist.o sourcelist.c
 
+signalswindow.o: signalswindow.c signalswindow.h
+	$(CC) -c -gstabs -o signalswindow.o signalswindow.c
+
+setbreak.o: setbreak.s
+	$(CC) -c -o setbreak.o -Wa,-mregnames setbreak.s
+	
 __unix_to_amiga_path_name.o: __unix_to_amiga_path_name.c unix.h
 	$(CC) -c -gstabs -o __unix_to_amiga_path_name.o __unix_to_amiga_path_name.c
 
 ../db101: suspend.o symbols.o gui.o hexview.o console.o source.o \
-			stabs.o variables.o pipe.o async.o sourcelist.o \
+			stabs.o variables.o pipe.o async.o sourcelist.o signalswindow.o \
 			disassembler.o main.o breakpoints.o stacktrace.o attach.o breakpointswindow.o \
-			freemem.o arexxport.o __unix_to_amiga_path_name.o
+			freemem.o arexxport.o setbreak.o __unix_to_amiga_path_name.o
 	$(CC) -gstabs main.o suspend.o symbols.o gui.o hexview.o stabs.o variables.o \
 			disassembler.o breakpoints.o stacktrace.o attach.o async.o sourcelist.o \
 			breakpointswindow.o freemem.o arexxport.o console.o source.o pipe.o \
-			__unix_to_amiga_path_name.o   -lauto -o ../db101
+			signalswindow.o \
+			setbreak.o __unix_to_amiga_path_name.o   -lauto -o ../db101

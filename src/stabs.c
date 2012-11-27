@@ -61,6 +61,7 @@ struct stab_function *stabs_get_function_from_address (uint32 faddress)
 		{
 			if (faddress >= f->address && faddress < f->address + f->size)
 				return f;
+
 			f = (struct stab_function *) IExec->GetSucc ((struct Node *)f);
 		}
 		s = (struct stab_sourcefile *) IExec->GetSucc((struct Node *)s);
@@ -748,7 +749,7 @@ void stabs_interpret_typedefs()
 {
 	char *stabstr = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stabstr", TAG_DONE);
 	uint32 *stab = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
-	if (!stab)
+	if (!stab || !stabstr)
 		return;
 
 	IExec->NewList (&sourcefile_list);

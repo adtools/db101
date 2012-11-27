@@ -38,7 +38,7 @@
 #include "gui.h"
 #include "stacktrace.h"
 #include "freemem.h"
-
+#include "variables.h"
 
 Object *StacktraceListBrowserObj;
 struct List stacktrace_list;
@@ -82,10 +82,9 @@ void stacktrace_update()
 	struct Node *node;
 	uint32 stacksize = process->pr_StackSize;
 	uint32 stackupper = (uint32)t->tc_SPUpper;
-	uint32 stackpointer = (uint32)t->tc_SPReg;
+	uint32 stackpointer = context_copy.gpr[1]; //(uint32)t->tc_SPReg;
 
 	uint32 p = stackpointer;
-
 	IIntuition->SetAttrs(StacktraceListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
 	int i = 0;
 	while (p < stackupper-28)
@@ -120,7 +119,10 @@ void stacktrace_update()
         							{
 							            IExec->AddTail(&stacktrace_list, node);
 									}
-		p = *(uint32*)p;
+		if(is_readable_address(p))
+			p = *(uint32*)p;
+		else
+			p = stackupper-28;
 	}
 	IIntuition->SetGadgetAttrs((struct Gadget *)StacktraceListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &stacktrace_list, TAG_END);
 }

@@ -9,15 +9,25 @@
 #include "gui.h"
 #include "stabs.h"
 
+#define dprintf(format...)	IExec->DebugPrintF(format)
+
+extern BOOL is_readable_address (uint32);
+
 extern struct DebugIFace *IDebug;
 
 struct List breakpoint_list;
 BOOL breakpoints_installed = FALSE;
-BOOL asmtrace_should_restore = FALSE;
+
+BOOL has_tracebit = TRUE;
 
 void init_breakpoints()
 {
 	IExec->NewList(&breakpoint_list);
+	
+	uint32 family;
+	IExec->GetCPUInfoTags(GCIT_Family, &family, TAG_DONE);
+	if(family == CPUFAMILY_4XX)
+		has_tracebit = FALSE;
 }
 
 BOOL is_breakpoint_at(uint32 addr)
@@ -99,6 +109,8 @@ void insert_line_breakpoints()
 {
 	struct stab_function *f = current_function;
 	uint32 i = f->currentline;
+	if(i == f->numberoflines-1)
+		return;
 
 	if (f->line[i].type == LINE_LOOP)
 	{
@@ -192,7 +204,6 @@ BOOL breakpoint_line_in_file (uint32 sline, char *file)
 	struct stab_function *f = stabs_sline_to_nline(file, sline, &nline);
 	if(f)
 	{
-		printf("Inserting breakpoint: 0x%x (0x%x)\n");
 		insert_breakpoint (f->address + f->line[nline].adr, BR_NORMAL_FUNCTION, (APTR)f, sline);
 		return TRUE;
 	}
@@ -280,38 +291,199 @@ void free_breakpoints ()
 	}
 }
 
+/* general defines */
+#define PPCIDXMASK      0xfc000000
+#define PPCIDX2MASK     0x000007fe
+#define PPCDMASK        0x03e00000
+#define PPCAMASK        0x001f0000
+#define PPCBMASK        0x0000f800
+#define PPCCMASK        0x000007c0
+#define PPCMMASK        0x0000003e
+#define PPCCRDMASK      0x03800000
+#define PPCCRAMASK      0x001c0000
+#define PPCLMASK        0x00600000
+#define PPCOE           0x00000400
+#define PPCVRC          0x00000400
+#define PPCDST          0x02000000
+#define PPCSTRM         0x00600000
+
+#define PPCIDXSH        26
+#define PPCDSH          21
+#define PPCASH          16
+#define PPCBSH          11
+#define PPCCSH          6
+#define PPCMSH          1
+#define PPCCRDSH        23
+#define PPCCRASH        18
+#define PPCLSH          21
+#define PPCIDX2SH       1
+
+#define PPCGETIDX(x)    (((x)&PPCIDXMASK)>>PPCIDXSH)
+#define PPCGETD(x)      (((x)&PPCDMASK)>>PPCDSH)
+#define PPCGETA(x)      (((x)&PPCAMASK)>>PPCASH)
+#define PPCGETB(x)      (((x)&PPCBMASK)>>PPCBSH)
+#define PPCGETC(x)      (((x)&PPCCMASK)>>PPCCSH)
+#define PPCGETM(x)      (((x)&PPCMMASK)>>PPCMSH)
+#define PPCGETCRD(x)    (((x)&PPCCRDMASK)>>PPCCRDSH)
+#define PPCGETCRA(x)    (((x)&PPCCRAMASK)>>PPCCRASH)
+#define PPCGETL(x)      (((x)&PPCLMASK)>>PPCLSH)
+#define PPCGETIDX2(x)   (((x)&PPCIDX2MASK)>>PPCIDX2SH)
+#define PPCGETSTRM(x)   (((x)&PPCSTRM)>>PPCDSH)
+
+typedef enum
+{
+	PPC_BRANCH,
+	PPC_BRANCHCOND,
+	PPC_BRANCHTOLINK,
+	PPC_BRANCHTOLINKCOND,
+	PPC_BRANCHTOCTR,
+	PPC_BRANCHTOCTRCOND,
+	PPC_OTHER
+} ppctype;
+
+typedef enum
+{
+	PPCIN_LINK,
+	PPCIN_CTR,
+	PPCIN_NONE
+} ppcintype;
+
+ppctype PPC_DisassembleBranchInstr(uint32 instr, int32 *reladdr)
+{
+	unsigned char *p = (unsigned char *)&instr;
+	uint32 in = p[0]<<24 | p[1]<<16 | p[2]<<8 | p[3];
+	switch (PPCGETIDX(in))
+	{
+		case 16:
+		{
+			int d = (int)(in & 0xfffc);
+
+			if (d >= 0x8000)
+				d -= 0x10000;
+			*reladdr = d;
+			return PPC_BRANCHCOND;
+			break;
+		}
+		case 18:
+		{
+			int d = (int)(in & 0x3fffffc);
+
+			if (d >= 0x2000000)
+				d -= 0x4000000;
+    		*reladdr = d;
+		    return PPC_BRANCH;
+			break;
+		}
+		case 19:
+			switch (PPCGETIDX2(in))
+			{
+				case 16:
+					//return branch(dp,in,"lr",0,0);  /* bclr */
+					return PPC_BRANCHTOLINK;
+
+				case 528:
+					//return branch(dp,in,"ctr",0,0);  /* bcctr */
+					return PPC_BRANCHTOCTR;
+					
+				default:
+					return PPC_OTHER;
+			}
+			break;
+		default:
+			return PPC_OTHER;
+	}
+}
 
 BOOL asm_trace = FALSE;
 
-uint32 asmstep_addr = 0;
-uint32 asmstep_buffer = 0;
+uint32 asmstep_addr[2] = { 0, 0};
+uint32 asmstep_buffer[2] = { 0, 0 };
+BOOL asmtrace_should_restore[2] = { FALSE, FALSE };
+int no_asm_breaks = 0;
 
+#define    MSR_TRACE_ENABLE           0x00000400
 
 void asmstep_install()
 {
-	char dummy1[5], dummy2[40];
-	uint32 traceaddr = (uint32)IDebug->DisassembleNative((APTR)context_copy.ip, dummy1, dummy2);
-
-	if (is_breakpoint_at(traceaddr))
+	if(has_tracebit)
 	{
-		asmtrace_should_restore = FALSE;
-		asm_trace = TRUE;
+		struct ExceptionContext ctx;;
+		IDebug->ReadTaskContext((struct Task *)process, &ctx, RTCF_STATE);
+		//this is not supported on the sam cpu:
+		ctx.msr |= MSR_TRACE_ENABLE;
+		ctx.ip = context_copy.ip;
+		IDebug->WriteTaskContext((struct Task *)process, &ctx, RTCF_STATE);
 	}
 	else
 	{
-		asmtrace_should_restore = TRUE;
+		int32 offset;
 
-		if (!memory_insert_breakpoint (traceaddr, &asmstep_buffer))
+		char dummy1[5], dummy2[40];
+		asmstep_addr[0] = (uint32)IDebug->DisassembleNative((APTR)context_copy.ip, dummy1, dummy2);
+
+		switch(PPC_DisassembleBranchInstr(*(uint32 *)context_copy.ip, &offset))
 		{
-			asmstep_addr = traceaddr;
-			asm_trace = TRUE;
+			case PPC_OTHER:
+				no_asm_breaks = 1;
+				break;
+			case PPC_BRANCHTOLINK:
+				no_asm_breaks = 2;
+				asmstep_addr[1] = context_copy.lr;
+				break;
+			case PPC_BRANCHTOCTR:
+				no_asm_breaks = 2;
+				asmstep_addr[1] = context_copy.ctr;
+				break;
+			case PPC_BRANCHCOND:
+			case PPC_BRANCH:
+				no_asm_breaks = 2;
+				asmstep_addr[1] = context_copy.ip + offset;
+				break;
+			default:
+				break;
+		}
+		int i;
+		for(i = 0; i < no_asm_breaks; i++)
+		{
+			if (is_breakpoint_at(asmstep_addr[i]))
+			{
+				asmtrace_should_restore[i] = FALSE;
+			}
+#if 1
+			else if(!is_readable_address(asmstep_addr[i]))
+			{
+				asmtrace_should_restore[i] = FALSE;
+			}
+#endif
+			else
+			{
+				asmtrace_should_restore[i] = TRUE;
+				memory_insert_breakpoint (asmstep_addr[i], &asmstep_buffer[i]);
+			}
 		}
 	}
+	asm_trace = TRUE;
 }
 
 void asmstep_remove()
 {
-	if (asm_trace && asmtrace_should_restore)
-		memory_remove_breakpoint(asmstep_addr, &asmstep_buffer);
+	if(has_tracebit)
+	{
+		struct ExceptionContext ctx;;
+		IDebug->ReadTaskContext((struct Task *)process, &ctx, RTCF_STATE);
+		//this is not supported on the sam cpu:
+		ctx.msr &= ~MSR_TRACE_ENABLE;
+		ctx.ip = context_copy.ip;
+		IDebug->WriteTaskContext((struct Task *)process, &ctx, RTCF_STATE);
+	}
+	else
+	{
+		int i;
+		for(i = 0; i < no_asm_breaks; i++)
+		{
+			if (asmtrace_should_restore[i])
+				memory_remove_breakpoint(asmstep_addr[i], &asmstep_buffer[i]);
+		}
+	}
 	asm_trace = FALSE;
 }

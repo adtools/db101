@@ -50,6 +50,9 @@
 #include "unix.h"
 #include "console.h"
 #include "pipe.h"
+#include "signalswindow.h"
+
+#define dprintf(format...)	IExec->DebugPrintF(format)
 
 enum
 {
@@ -74,6 +77,7 @@ enum
 	GAD_CONSOLE_LISTBROWSER,
 	GAD_AREXX_STRING,
 	GAD_AREXX_BUTTON,
+	GAD_SIGNAL_BUTTON,
 	GAD_X_BUTTON,
 	GAD_TEXT
 };
@@ -98,10 +102,12 @@ Object *StartButtonObj, *PauseButtonObj, *StepOverButtonObj, *StepIntoButtonObj,
 Object *HexviewButtonObj, *DisassembleviewButtonObj, *StacktraceButtonObj;
 Object *ArexxButtonObj, *ArexxStringObj, *arexx_obj;
 Object *SourcelistListBrowserObj;
+Object *ClickTabObj;
+Object *SignalButtonObj;
 extern Object *VariablesListBrowserObj, *StacktraceListBrowserObj, *DisassemblerListBrowserObj, *ConsoleListBrowserObj, *SourceListBrowserObj;
 extern Object *DisassemblerStepButtonObj, *DisassemblerSkipButtonObj;
 
-char lastdir[1024] = "src"; //work:code/medium/StangTennis2D";  "qt:examples/widgets/calculator"; 
+char lastdir[1024] = ""; //work:code/medium/StangTennis2D";  "qt:examples/widgets/calculator"; 
 char filename[1024] = "";
 char childpath[1024] = "";
 
@@ -109,6 +115,8 @@ struct stab_function *current_function = NULL;
 struct stab_function *old_function = NULL;
 BOOL hasfunctioncontext = FALSE;
 BOOL isattached = FALSE;
+extern BOOL catch_sline;
+extern BOOL has_tracebit;
 
 int main_freemem_hook = -1;
 
@@ -204,15 +212,17 @@ uint32 obtain_all_signals()
 	signal |= breakpoints_obtain_window_signal();
 	signal |= arexx_obtain_signal();
 	signal |= pipe_obtain_signal();
+	signal |= sigwin_obtain_signal();
 	signal |= debug_sigfield;
 
 	return signal;
 }
 
+STRPTR PageLabels_1[] = {"Source", "Assembly", NULL};
+
 void main_open_window()
 {
 	main_freemem_hook = freemem_alloc_hook();
-	STRPTR PageLabels_1[] = {"Source", "Assembly", NULL};
 
 	locals_init();
 	console_init();
@@ -226,7 +236,7 @@ void main_open_window()
     /* Create the window object. */
     if(( MainWinObj = WindowObject,
             WA_ScreenTitle, "Debug 101",
-            WA_Title, "Debug 101 v0.9.1",
+            WA_Title, "Debug 101 v1.0.0 BETA",
             WA_Width, 1024,
 			WA_Height, 768,
             WA_DepthGadget, TRUE,
@@ -253,6 +263,7 @@ void main_open_window()
 	                	GA_ID, GAD_RELOAD_BUTTON,
 	                	GA_Text, "Reload",
 	                	GA_RelVerify, TRUE,
+	                    GA_Disabled, TRUE,
 	                	GA_HintInfo, "Push to reload previously executed file",
 	                ButtonEnd,
 	                CHILD_WeightedWidth, 0,
@@ -380,7 +391,7 @@ void main_open_window()
 	            EndMember,
 	            
 	            LAYOUT_AddChild, HLayoutObject,
-		            LAYOUT_AddChild, ClickTabObject,
+		            LAYOUT_AddChild, ClickTabObj = ClickTabObject,
 		            	GA_Text, PageLabels_1,
 
 		            	CLICKTAB_Current,	0,
@@ -474,6 +485,15 @@ void main_open_window()
 	                CHILD_WeightedHeight, 0,
 	                CHILD_WeightedWidth, 0,
 	                
+	                LAYOUT_AddChild, SignalButtonObj = ButtonObject,
+						GA_ID, GAD_SIGNAL_BUTTON,
+	                    GA_RelVerify, TRUE,
+						GA_Text, "Signal",
+						GA_Disabled, FALSE,
+					ButtonEnd,
+	                CHILD_WeightedHeight, 0,
+	                CHILD_WeightedWidth, 0,
+	                
 					LAYOUT_AddChild, XButtonObj = ButtonObject,
 						GA_ID, GAD_X_BUTTON,
 	                    GA_RelVerify, TRUE,
@@ -498,11 +518,13 @@ void main_open_window()
 }
 
 BOOL done = FALSE;
+#define    MSR_TRACE_ENABLE           0x00000400
 
 void event_loop()
 {	
             ULONG wait, signal;
 			BOOL shouldplay = FALSE;
+			char *symbol = NULL;
 
             /* Obtain the window wait signal mask. */
             //IIntuition->GetAttr( WINDOW_SigMask, MainWinObj, &signal );
@@ -532,8 +554,10 @@ void event_loop()
 					{
 						asmstep_remove();
 						tracing = TRUE;
+						if(!should_continue && !catch_sline)
+							disassembler_makelist();
 					}
-
+					
 					if (should_continue)
 					{
 						install_all_breakpoints();
@@ -544,53 +568,79 @@ void event_loop()
 					else
 					{
 
-						context_ptr->ip = context_copy.ip;
-	
-						button_setdisabled (StartButtonObj, FALSE);
-						button_setdisabled (PauseButtonObj, TRUE);
-						button_setdisabled (StepOverButtonObj, FALSE);
-						button_setdisabled (StepIntoButtonObj, FALSE);
-						//button_setdisabled (VariablesButtonObj, FALSE);
-						button_setdisabled (KillButtonObj, FALSE);
-						button_setdisabled (CrashButtonObj, FALSE);
-						button_setdisabled (SelectButtonObj, TRUE);
-						//button_setdisabled (DisassembleviewButtonObj, FALSE);
-
-						remove_line_breakpoints();
-
+						//context_ptr->ip = context_copy.ip;
+						
 						current_function = stabs_get_function_from_address (context_copy.ip);
+						dprintf("current_function == 0x%x\n", current_function);
 						if (current_function)
 							hasfunctioncontext = TRUE;
-
+						else
+							hasfunctioncontext = FALSE;
+							
 						if (hasfunctioncontext)
+						{
+							int nline = get_nline_from_address (context_copy.ip);
+
+							if (nline != -1)
+							{
+								catch_sline = FALSE;
+								
+								current_function->currentline = nline;
+								//output_lineinfile (current_function->lineinfile[current_function->currentline]);
+								source_update();
+							}
+							else if (!tracing)
+							{
+								console_printf(OUTPUT_WARNING, "Function overload error!");
+								//printf("function size: 0x%x function address: 0x%x\n", current_function->size, current_function->address);
+							}
+						}
+						else if(symbol = get_symbol_from_value(context_copy.ip))
+						{
+							console_printf(OUTPUT_NORMAL, "At symbol %s", symbol);
+							if(catch_sline)
+							{
+								catch_sline = FALSE;
+								button_setdisabled (StepOverButtonObj, FALSE);
+								button_setdisabled (StepIntoButtonObj, FALSE);
+								IIntuition->SetAttrs(ClickTabObj,
+												CLICKTAB_Labels, ~0,
+												TAG_DONE );
+								IIntuition->SetAttrs(ClickTabObj,
+													CLICKTAB_Current, (uint16)1,
+													CLICKTAB_Labels, PageLabels_1,
+													TAG_END);
+							}
+						}
+						else if(!tracing)
+							console_printf(OUTPUT_WARNING, "Program has reached an unknown TRAP");
+
+						if(catch_sline)
+						{
+							//static int count = 0;
+							//printf("asmstep(%d)\n", count++);
+							asmstep();
+						}
+						else if(hasfunctioncontext)
 						{
 							if (current_function != old_function)
 								output_functionheader();
 							old_function = current_function;
 
-							int nline = get_nline_from_address (context_copy.ip);
+							button_setdisabled (StartButtonObj, FALSE);
+							button_setdisabled (PauseButtonObj, TRUE);
+							button_setdisabled (StepOverButtonObj, FALSE);
+							button_setdisabled (StepIntoButtonObj, FALSE);
+							button_setdisabled (KillButtonObj, FALSE);
+							//button_setdisabled (CrashButtonObj, FALSE);
+							button_setdisabled (SelectButtonObj, TRUE);
 
-							if (nline != -1)
-							{
-								current_function->currentline = nline;
-								//output_lineinfile (current_function->lineinfile[current_function->currentline]);
-								source_update();
-							}
-							else
-								if (!tracing)
-								{
-									console_printf(OUTPUT_WARNING, "Function overload error!");
-									//printf("function size: 0x%x function address: 0x%x\n", current_function->size, current_function->address);
-								}
+							remove_line_breakpoints();
+
+							locals_update();
+							stacktrace_update();
+							disassembler_makelist();
 						}
-						else
-							console_printf(OUTPUT_WARNING, "Program has reached an unknown TRAP");
-
-						//registers_update_window();
-						locals_update();
-						//globals_update_window();
-						stacktrace_update();
-						disassembler_makelist();
 					}
 				}
                 if(wait & SIGF_CHILD)
@@ -613,9 +663,7 @@ void event_loop()
 					button_setdisabled (SetBreakButtonObj, TRUE);
 					button_setdisabled (FilenameStringObj, TRUE);
 					button_setdisabled (HexviewButtonObj, TRUE);
-					//button_setdisabled (VariablesButtonObj, TRUE);
-					//button_setdisabled (RegisterviewButtonObj, TRUE);
-					//button_setdisabled (DisassembleviewButtonObj, TRUE);
+					button_setdisabled (ReloadButtonObj, FALSE);
 					IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
 
 					free_symbols();
@@ -627,6 +675,7 @@ void event_loop()
 					source_clear();
 					sourcelist_clear();
 					stacktrace_clear();
+					disassembler_clear();
 
 					console_printf(OUTPUT_SYSTEM, "Program has ended");
 				}
@@ -642,6 +691,10 @@ void event_loop()
 				if (wait & breakpoints_obtain_window_signal())
 				{
 					breakpoints_event_handler();
+				}
+				if (wait & sigwin_obtain_signal())
+				{
+					sigwin_event_handler();
 				}
 				if(wait & arexx_obtain_signal())
 				{
@@ -660,8 +713,6 @@ void event_loop()
 				}
 				shouldplay = FALSE;
 			}
-
-
 			return;
 }
 
@@ -712,7 +763,9 @@ void main_play()
 		button_setdisabled (CrashButtonObj, TRUE);
 		button_setdisabled (SelectButtonObj, TRUE);
 
-		play();
+		should_continue = FALSE;
+		if(!play())
+			button_setdisabled(StartButtonObj, FALSE);
 	}
 }
 
@@ -736,9 +789,17 @@ void main_step()
 	if (hasfunctioncontext)
 	{
 		step();
-									
-		//if (current_function->currentline == current_function->numberoflines - 1)
-		//button_setdisabled (StepButtonObj, TRUE);
+	}
+}
+
+void main_into()
+{
+	button_setdisabled (StepOverButtonObj, TRUE);
+	button_setdisabled (StepIntoButtonObj, TRUE);
+
+	if (1) //hasfunctioncontext)
+	{
+		into();
 	}
 }
 
@@ -779,8 +840,8 @@ void main_load(char *name, char *path, char *args)
 		button_setdisabled (SetBreakButtonObj, FALSE);
 		button_setdisabled (FilenameStringObj, FALSE);
 		button_setdisabled (HexviewButtonObj, FALSE);
-		//button_setdisabled (RegisterviewButtonObj, FALSE);
-
+		button_setdisabled (ReloadButtonObj, TRUE);
+		
 		IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
 														STRINGA_TextVal, name,
 														TAG_DONE);
@@ -800,11 +861,11 @@ void main_attach(struct Process *pr)
 
 		init_breakpoints();
 
-		stabs_interpret_typedefs();
-		stabs_interpret_functions();
-		get_symbols();
-		stabs_interpret_globals();
+		stabs_interpret_stabs();
 		close_elfhandle(exec_elfhandle);
+
+		sourcelist_update();
+		source_update();
 
 		button_setdisabled (SelectButtonObj, TRUE);
 		button_setdisabled (StartButtonObj, FALSE);
@@ -813,6 +874,9 @@ void main_attach(struct Process *pr)
 		button_setdisabled (SetBreakButtonObj, FALSE);
 		button_setdisabled (FilenameStringObj, FALSE);
 		button_setdisabled (HexviewButtonObj, FALSE);
+		button_setdisabled (StepOverButtonObj, FALSE);
+		button_setdisabled (StepIntoButtonObj, FALSE);
+		
 		//button_setdisabled (RegisterviewButtonObj, FALSE);
 
 										//IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
@@ -891,6 +955,11 @@ void main_event_handler()
 					main_step();
 					break;
 
+				case GAD_STEPINTO_BUTTON:
+				
+					main_into();
+					break;
+
 				case GAD_KILL_BUTTON:
 
 					main_kill();
@@ -911,6 +980,11 @@ void main_event_handler()
 					locals_handle_input();
 					break;
 
+				case GAD_SIGNAL_BUTTON:
+				
+					sigwin_open_window();
+					break;
+
 				case GAD_X_BUTTON:
 
 					console_clear();
@@ -927,14 +1001,18 @@ void main_event_handler()
 									
 				case GAD_DISASSEMBLER_STEP_BUTTON:
 					asmstep();
+					should_continue = FALSE;
+					asm_trace = TRUE;
 					break;
 									
 				case GAD_DISASSEMBLER_SKIP_BUTTON:
 					asmskip();
+					disassembler_makelist();
 					break;
 
 				case GAD_SOURCE_LISTBROWSER:
 					source_handle_input();
+					source_show_currentline();
 					break;
 				
 				case GAD_SOURCELIST_LISTBROWSER:

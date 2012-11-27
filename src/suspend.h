@@ -2,9 +2,10 @@
 #include <libraries/elf.h>
 
 extern int load_inferior(char *, char *, char *);
-extern void play(void);
+extern BOOL play(void);
 extern void pause(void);
 extern void step(void);
+extern void into(void);
 extern void asmstep(void);
 extern void asmskip(void);
 extern void killtask(void);

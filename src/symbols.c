@@ -36,6 +36,7 @@
 #include "stabs.h"
 #include "symbols.h"
 #include "freemem.h"
+#include "console.h"
 
 struct List symbols_list;
 BOOL has_symbols = FALSE;
@@ -62,39 +63,32 @@ ULONG amigaos_symbol_callback(struct Hook *hook, struct Task *task, struct Symbo
 	return 1;
 }
 
-Elf32_Handle open_elfhandle()
+Elf32_Handle open_elfhandle(BPTR seglist)
 {
-	BPTR exec_seglist = IDOS->GetProcSegList (process, GPSLF_SEG|GPSLF_RUN);
-
-	if (!exec_seglist)
-	{
-		printf("Couldn't get seglist!\n");
-		return (0);
-	}
-
-    IDOS->GetSegListInfoTags(exec_seglist, 
-							 GSLI_ElfHandle,      &exec_elfhandle,
+	Elf32_Handle elfhandle;
+    IDOS->GetSegListInfoTags(seglist, 
+							 GSLI_ElfHandle,      &elfhandle,
 							 TAG_DONE);
 
-	if (exec_elfhandle == NULL)
+	if(elfhandle == NULL)
 	{
-		printf ("not a PowerPC executable\n");
+		console_printf (OUTPUT_WARNING, "not a PowerPC executable");
 		return (0);
     }
- 
-    exec_elfhandle = IElf->OpenElfTags(OET_ElfHandle, exec_elfhandle, TAG_DONE);
 
-	if (exec_elfhandle == NULL)
+    elfhandle = IElf->OpenElfTags(OET_ElfHandle, elfhandle, TAG_DONE);
+
+	if (elfhandle == NULL)
 	{
-		printf ("couldn't open elfhandle\n");
+		console_printf (OUTPUT_WARNING, "couldn't open elfhandle");
 		return (0);
-    }
-	return exec_elfhandle;
+   	}
+	return elfhandle;
 }
 
 void close_elfhandle (Elf32_Handle handle)
 {
-	IElf->CloseElfTags (exec_elfhandle, CET_CloseInput, TRUE, TAG_DONE);
+	IElf->CloseElfTags (handle, CET_CloseInput, TRUE, TAG_DONE);
 }
 
 
@@ -120,17 +114,7 @@ void free_symbols ()
 {
 	if (!has_symbols)
 		return;
-#if 0
-	struct amigaos_symbol *symbol = (struct amigaos_symbol *)IExec->GetHead (&symbols_list);
-	while (symbol)
-	{
-		struct amigaos_symbol *next = (struct amigaos_symbol *)IExec->GetSucc ((struct Node *)symbol);
-		IExec->Remove ((struct Node *)symbol);
-		free (symbol->name);
-		IExec->FreeMem (symbol, sizeof(struct amigaos_symbol));
-		symbol = next;
-	}
-#endif
+
 	if(symbols_freemem_hook != -1)
 		freemem_free_hook(symbols_freemem_hook);
 	IExec->NewList(&symbols_list);

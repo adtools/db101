@@ -8,7 +8,7 @@ void insert_breakpoint (uint32, uint32, APTR, uint32);
 void remove_breakpoint (uint32);
 void insert_line_breakpoints(void);
 void remove_line_breakpoints(void);
-void guess_line_in_function(void);
+int guess_line_in_function(void);
 uint32 translate_sline_to_nline(uint32);
 int get_nline_from_address(uint32);
 
@@ -19,7 +19,8 @@ void free_breakpoints(void);
 
 void asmstep_install(void);
 void asmstep_remove(void);
-
+void stepout_install(void);
+void stepout_remove(void);
 
 struct breakpoint
 {
@@ -51,5 +52,22 @@ enum __breakpoint_type
 	BR_TRACE
 };
 
+typedef enum
+{
+	NOBRANCH,
+	NORMALBRANCH,
+	NORMALBRANCHCOND,
+	ALLOWEDBRANCH,
+	ALLOWEDBRANCHCOND,
+	DISALLOWEDBRANCH,
+	DISALLOWEDBRANCHCOND
+} branch;
+
+branch is_branch_allowed(void);
+
 extern struct List breakpoint_list;
 extern BOOL breakpoints_installed;
+
+void tracking_init();
+void tracking_cleanup();
+void tracking_clear();

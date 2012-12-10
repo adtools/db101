@@ -33,6 +33,8 @@
 #include <string.h>
 
 #include "suspend.h"
+#include "console.h"
+#include "attach.h"
 
 enum
 {
@@ -186,7 +188,7 @@ struct Process *attach_select_process()
 									if (selected != 0xffffffff)
 									{
 										ret = processstructlist[selected];
-										printf("attaching to process with name %s\n", processnamelist[selected]);
+										console_printf(OUTPUT_SYSTEM, "attaching to process with name %s\n", processnamelist[selected]);
 									}
 
 									done = TRUE;

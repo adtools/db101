@@ -13,7 +13,7 @@
 #include "breakpoints.h"
 
 struct List source_list;
-Object *SourceListBrowserObj;
+//Object *MainObj[GAD_SOURCE_LISTBROWSER];
 struct ColumnInfo *sourcecolumninfo;
 
 extern struct Window *mainwin;
@@ -51,14 +51,14 @@ void source_cleanup()
 
 void source_clear()
 {
-	IIntuition->SetAttrs(SourceListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_SOURCE_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
 	if(!IsListEmpty(&source_list))
 	{
 		IListBrowser->FreeListBrowserList(&source_list);
 		freemem_clear(source_freemem_hook);
 	}
 	strcpy(currentfile, "");
-	IIntuition->SetGadgetAttrs((struct Gadget *)SourceListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &source_list, TAG_END);
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_SOURCE_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &source_list, TAG_END);
 }
 
 char *source_convert_string(char *str)
@@ -131,7 +131,7 @@ void source_load_file(char *name)
 	FILE *fd = fopen(fullpath, "r");
 	if(fd)
 	{
-		IIntuition->SetAttrs(SourceListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+		IIntuition->SetAttrs(MainObj[GAD_SOURCE_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
 		int sline = 1;
 		while(1)
 		{
@@ -177,7 +177,7 @@ void source_load_file(char *name)
 			sline++;	
 		}
 		fclose(fd);
-		IIntuition->SetGadgetAttrs((struct Gadget *)SourceListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &source_list, TAG_END);
+		IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_SOURCE_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &source_list, TAG_END);
 		strcpy(currentfile, name);
 	}
 	else
@@ -190,7 +190,7 @@ void source_show_currentline()
 	{
 		int line = current_function->line[current_function->currentline].infile;
 	
-		IIntuition->SetGadgetAttrs((struct Gadget *)SourceListBrowserObj, mainwin, NULL,
+		IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_SOURCE_LISTBROWSER], mainwin, NULL,
 													LISTBROWSER_Selected, line-1,
 													LISTBROWSER_MakeVisible, line-1,
 													TAG_END);
@@ -204,10 +204,10 @@ void source_handle_input()
 	lb_userdata *lbnode;
 	struct stab_function *f;
 
-	IIntuition->GetAttr(LISTBROWSER_SelectedNode, SourceListBrowserObj, (ULONG *) &node);
+	IIntuition->GetAttr(LISTBROWSER_SelectedNode, MainObj[GAD_SOURCE_LISTBROWSER], (ULONG *) &node);
 	if(!node)
 		return;
-	IIntuition->GetAttrs(SourceListBrowserObj, LISTBROWSER_RelEvent, &event, TAG_DONE);
+	IIntuition->GetAttrs(MainObj[GAD_SOURCE_LISTBROWSER], LISTBROWSER_RelEvent, &event, TAG_DONE);
 	
 	switch( event )
 	{
@@ -239,7 +239,12 @@ void source_handle_input()
 
 void source_update()
 {
-	if(strcmp(currentfile, current_function->sourcename) != 0)
-		source_load_file(current_function->sourcename);
-	source_show_currentline();
+	if(!current_function)
+		source_clear();
+	else
+	{
+		if(strcmp(currentfile, current_function->sourcename) != 0)
+			source_load_file(current_function->sourcename);
+		source_show_currentline();
+	}
 }

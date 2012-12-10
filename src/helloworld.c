@@ -79,7 +79,7 @@ int main()
 	//printf("main: a = %d\n", a);
 
 	printf("Waiting for signal...\n");
-	IExec->Wait(SIGBREAKF_CTRL_C);
+	//IExec->Wait(SIGBREAKF_CTRL_C);
 	printf("Got it!\n");
 
 	printf("Goodbye world!\n");

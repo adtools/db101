@@ -95,18 +95,18 @@ void hex_init_section_list ()
 	char *name, *strtable;
 	struct Node *node;
 
-	open_elfhandle();
-	if (!exec_elfhandle)
+	Elf32_Handle elfhandle = open_elfhandle(exec_seglist);
+	if (!elfhandle)
 		return;
 
-	IElf->GetElfAttrsTags (exec_elfhandle,  EAT_NumSections, &hex_numsections,
+	IElf->GetElfAttrsTags (elfhandle,  EAT_NumSections, &hex_numsections,
 											EAT_SectionStringTable, &index,
 											TAG_DONE);
-	strtable = IElf->GetSectionTags(exec_elfhandle, GST_SectionIndex, index, TAG_DONE);
+	strtable = IElf->GetSectionTags(elfhandle, GST_SectionIndex, index, TAG_DONE);
 
 	for (i = 0; i < hex_numsections; i++)
 	{
-		header = IElf->GetSectionHeaderTags (exec_elfhandle, GST_SectionIndex, i, TAG_DONE);
+		header = IElf->GetSectionHeaderTags (elfhandle, GST_SectionIndex, i, TAG_DONE);
 
 		if (header)
 		{
@@ -116,7 +116,7 @@ void hex_init_section_list ()
 	}
 	sectionlist[i] = NULL;
 
-	close_elfhandle(exec_elfhandle);
+	close_elfhandle(elfhandle);
 }
 
 void hex_free_section_list ()
@@ -183,12 +183,12 @@ void hex_read_section(uint32 *section, uint32 size)
 
 void hex_load_section (int index)
 {
-	open_elfhandle();
-	if (!exec_elfhandle)
+	Elf32_Handle elfhandle = open_elfhandle(exec_seglist);
+	if (!elfhandle)
 		return;
 
-	uint32 *section = IElf->GetSectionTags(exec_elfhandle, GST_SectionIndex, index, TAG_DONE);
-	Elf32_Shdr *header = IElf->GetSectionHeaderTags (exec_elfhandle, GST_SectionIndex, index, TAG_DONE);
+	uint32 *section = IElf->GetSectionTags(elfhandle, GST_SectionIndex, index, TAG_DONE);
+	Elf32_Shdr *header = IElf->GetSectionHeaderTags (elfhandle, GST_SectionIndex, index, TAG_DONE);
 	if (!section)
 		return;
 
@@ -200,7 +200,7 @@ void hex_load_section (int index)
 	
 	hex_read_section(dptr, size);
 
-	close_elfhandle(exec_elfhandle);
+	close_elfhandle(elfhandle);
 }
 
 void hex_free_section()
@@ -353,20 +353,14 @@ void hex_event_handler()
 								
 								case HEX_READBUTTON:
 								{
-									char fromstr[9], untilstr[9], fstring[11];
+									char fstring[11];
 									int32 from, until;
-									//IIntuition->GetAttrs(HexFromStringObj, STRINGA_TextVal, fromstr, TAG_DONE);
-									//IIntuition->GetAttrs(HexUntilStringObj, STRINGA_TextVal, untilstr, TAG_DONE);
-									
-									printf("from buffer: %s\n", hex_from_buffer);
-									printf("until buffer: %s\n", hex_until_buffer);
-									
+							
 									sprintf(fstring, "0x%s",hex_from_buffer); 
 									from = strtol(fstring, fstring+11, 16);
 									sprintf(fstring, "0x%s",hex_until_buffer); 
 									until = strtol(fstring, fstring+11, 16);
 									
-									printf("reading from 0x%x until 0x%x\n", from, until);
 									if(from > 0 && until > from)
 										hex_read_section((uint32*)from, until-from+4);
 								}

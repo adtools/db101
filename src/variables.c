@@ -43,11 +43,11 @@
 #define dprintf(format...)	IExec->DebugPrintF(format)
 
 
-Object *VariablesListBrowserObj;
+//Object *MainObj[GAD_VARIABLES_LISTBROWSER];
 extern struct Window *mainwin;
 
 struct List variable_list;
-int locals_freemem_hook = -1;
+int variables_freemem_hook = -1;
 
 struct ColumnInfo *variablescolumninfo;
 
@@ -68,25 +68,50 @@ struct stab_function *variables_shown_function = NULL;
 
 BOOL is_readable_address (uint32 addr)
 {
-    uint32 attr;
+    uint32 attr, masked;
     APTR stack;
     BOOL ret = FALSE;
 
       /* Go supervisor */
     stack = IExec->SuperState();
     
-    attr = IMMU->GetMemoryAttrs((APTR)addr, 0);
+	attr = IMMU->GetMemoryAttrs((APTR)addr, 0);
 
     /* Return to old state */
     if (stack)
         IExec->UserState(stack);
 
-    if (attr & MEMATTRF_RW_MASK)
+    masked = attr & MEMATTRF_RW_MASK;
+    if(masked)
         ret = TRUE;
 
     return ret;
 }
 
+BOOL is_writeable_address (uint32 addr)
+{
+    uint32 attr, oldattr, masked;
+    APTR stack;
+    BOOL ret = FALSE;
+
+      /* Go supervisor */
+    stack = IExec->SuperState();
+    
+    oldattr = IMMU->GetMemoryAttrs((APTR)addr, 0);
+	IMMU->SetMemoryAttrs((APTR)addr, 4, MEMATTRF_READ_WRITE);
+	attr = IMMU->GetMemoryAttrs((APTR)addr, 0);
+	IMMU->SetMemoryAttrs((APTR)addr, 4, oldattr);
+
+    /* Return to old state */
+    if (stack)
+        IExec->UserState(stack);
+
+    masked = attr & MEMATTRF_RW_MASK;
+    if(masked == MEMATTRF_READ_WRITE)
+        ret = TRUE;
+
+    return ret;
+}
 uint32 get_pointer_value(struct stab_symbol *s)
 {
     if(s->type == NULL)
@@ -128,7 +153,7 @@ uint32 get_pointer_value(struct stab_symbol *s)
 
 char *print_variable_value(struct stab_symbol *s)
 {
-    char *ret = freemem_malloc(locals_freemem_hook, 256);
+    char *ret = freemem_malloc(variables_freemem_hook, 256);
     uint32 *addr = 0x0;
 
     switch (s->location)
@@ -325,7 +350,7 @@ struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32
 
 			char *str = print_variable_value(s);
 			
-            struct variables_userdata *u = freemem_malloc(locals_freemem_hook, sizeof(struct variables_userdata));
+            struct variables_userdata *u = freemem_malloc(variables_freemem_hook, sizeof(struct variables_userdata));
             u->s = s;
             u->haschildren = 0;
             
@@ -353,7 +378,7 @@ struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32
 			TEXT buf[1024];
 	        IUtility->SNPrintf(buf, sizeof(buf), "%s", s->name);
 	        
-		    struct variables_userdata *u = freemem_malloc(locals_freemem_hook, sizeof(struct variables_userdata));
+		    struct variables_userdata *u = freemem_malloc(variables_freemem_hook, sizeof(struct variables_userdata));
             u->s = s;
             u->haschildren = 1;
             u->isopen = 0;
@@ -387,7 +412,7 @@ struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32
 
 			char *str = " < struct > ";
 			
-            struct variables_userdata *u = freemem_malloc(locals_freemem_hook, sizeof(struct variables_userdata));
+            struct variables_userdata *u = freemem_malloc(variables_freemem_hook, sizeof(struct variables_userdata));
             u->s = s;
             u->haschildren = 1;
             u->isopen = 1;
@@ -417,8 +442,8 @@ struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32
 			if(e)
 			while(1)
 			{
-	    	    struct variables_userdata *u = freemem_malloc(locals_freemem_hook, sizeof(struct variables_userdata));
-		    	struct stab_symbol *news = freemem_malloc(locals_freemem_hook, sizeof(struct stab_symbol));
+	    	    struct variables_userdata *u = freemem_malloc(variables_freemem_hook, sizeof(struct variables_userdata));
+		    	struct stab_symbol *news = freemem_malloc(variables_freemem_hook, sizeof(struct stab_symbol));
 		    	news->name = e->name;
 		    	news->type = e->type;
 		    	switch(s->location)
@@ -456,7 +481,7 @@ struct Node *variables_add_children(struct Node *n, struct stab_symbol *s, int32
 
 struct Node *variables_add_pointer_children(struct Node *n, struct stab_symbol *s, int32 gen, int hidden)
 {
-    struct stab_symbol *news = freemem_malloc(locals_freemem_hook, sizeof(struct stab_symbol));
+    struct stab_symbol *news = freemem_malloc(variables_freemem_hook, sizeof(struct stab_symbol));
     news->name = " - ";
     news->type = s->type->points_to;
 	news->location = L_POINTER;
@@ -472,14 +497,14 @@ void params_populate_list(struct Node *node)
     struct List *l = &(current_function->params);
     struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
 
-	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_VARIABLES_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
     while (s)
     {
     	n = variables_add_children(n, s, 1, FALSE); //not hidden
     	
         s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
     }
-	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_VARIABLES_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
 	
 	params_list_populated = 1;
 }
@@ -491,14 +516,14 @@ void locals_populate_list(struct Node *node)
     struct List *l = &(current_function->symbols);
     struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
 
-	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_VARIABLES_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
     while (s)
     {
     	n = variables_add_children(n, s, 1, FALSE); //not hidden
     	
         s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
     }
-	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_VARIABLES_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
 	
 	locals_list_populated = 1;
 }
@@ -510,13 +535,13 @@ void globals_populate_list(struct Node *node)
     struct List *l = &global_symbols;
     struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
 
-	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_VARIABLES_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
     while (s)
     {
     	n = variables_add_children(n, s, 1, FALSE); //not hidden
         s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
     }
-	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_VARIABLES_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
 	
 	globals_list_populated = 1;
 }
@@ -542,7 +567,7 @@ void add_register(char *reg, char *value)
 
 void registers_populate_list()
 {
-	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_VARIABLES_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
 
 	char tempstr[256];
 	char tempstr2[256];
@@ -608,7 +633,7 @@ void registers_populate_list()
 		sprintf(tempstr2, "fpr%d", i);
 			add_register (tempstr2, tempstr);
 	}
-	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_VARIABLES_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
 }
 
 void update_register(struct Node *n, char *valuestr)
@@ -708,7 +733,7 @@ void variables_init_parents()
 
 void update_variables()
 {
-	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_VARIABLES_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
 	struct Node *n = IExec->GetHead(&variable_list);
 	while(n)
 	{
@@ -735,15 +760,15 @@ void update_variables()
         n = IExec->GetSucc(n);
 	}
 	registers_update();
-	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_VARIABLES_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
 }
 	
-void locals_update()
+void variables_update()
 {
 	if(current_function != variables_shown_function)
 	{
 		//if function has changed:
-		locals_clear();
+		variables_clear();
 	    IExec->NewList (&variable_list);
 	    globals_list_populated = 0;
 	    locals_list_populated = 0;
@@ -759,10 +784,10 @@ void locals_update()
 	variables_shown_function = current_function;
 }
 
-void locals_handle_input()
+void variables_handle_input()
 {
 	struct Node *n;
-	if(IIntuition->GetAttr(LISTBROWSER_SelectedNode, VariablesListBrowserObj, (uint32 *)&n))
+	if(IIntuition->GetAttr(LISTBROWSER_SelectedNode, MainObj[GAD_VARIABLES_LISTBROWSER], (uint32 *)&n))
 	{
 		if(n == globals_node && !globals_list_populated)
 		{
@@ -787,21 +812,21 @@ void locals_handle_input()
 												TAG_END);
 		if(u && u->haschildren && !u->isopen)
 		{
-			IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+			IIntuition->SetAttrs(MainObj[GAD_VARIABLES_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
 			if(u->s->type->type == T_POINTER)
 				variables_add_pointer_children(n, u->s, gen, FALSE);
 			else
 				variables_add_children(n, u->s, gen, FALSE);
 			u->isopen = 1;
-			IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+			IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_VARIABLES_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
 		}
 	}
 }
 
-void locals_init()
+void variables_init()
 {
 	IExec->NewList(&variable_list);
-	locals_freemem_hook = freemem_alloc_hook();
+	variables_freemem_hook = freemem_alloc_hook();
 	
     variablescolumninfo = IListBrowser->AllocLBColumnInfo(2,
         LBCIA_Column, 0,
@@ -813,22 +838,22 @@ void locals_init()
         TAG_DONE);
 }
 
-void locals_cleanup()
+void variables_cleanup()
 {
 	IListBrowser->FreeLBColumnInfo(variablescolumninfo);
 	IListBrowser->FreeListBrowserList(&variable_list);
-	if(locals_freemem_hook >= 0)
-		freemem_free_hook(locals_freemem_hook);
+	if(variables_freemem_hook >= 0)
+		freemem_free_hook(variables_freemem_hook);
 }
 
-void locals_clear()
+void variables_clear()
 {
 	variables_shown_function = NULL;
-	IIntuition->SetAttrs(VariablesListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_VARIABLES_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
     if(!IsListEmpty(&variable_list))
     {
         IListBrowser->FreeListBrowserList(&variable_list);
-		freemem_clear(locals_freemem_hook);
+		freemem_clear(variables_freemem_hook);
     }
-	IIntuition->SetGadgetAttrs((struct Gadget *)VariablesListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_VARIABLES_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
 }

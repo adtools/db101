@@ -41,7 +41,7 @@
 #include "freemem.h"
 
 
-Object *DisassemblerWinObj, *DisassemblerStepButtonObj, *DisassemblerSkipButtonObj, *DisassemblerListBrowserObj;
+//Object *DisassemblerWinObj, *DisassemblerStepButtonObj, *DisassemblerSkipButtonObj, *MainObj[GAD_DISASSEMBLER_LISTBROWSER];
 extern struct Window *mainwin;
 
 int32 disassembler_selected = 0;
@@ -62,7 +62,7 @@ void disassembler_show_selected()
 	if (disassembler_selected >= 0)
 	{
 		//int32 top = MAX(disassembler_selected - 3, 0);
-		IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, mainwin, NULL,
+		IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_DISASSEMBLER_LISTBROWSER], mainwin, NULL,
 												LISTBROWSER_Selected, disassembler_selected,
 												LISTBROWSER_MakeVisible, disassembler_selected,
 												TAG_DONE);
@@ -92,7 +92,7 @@ void disassembler_makelist()
 		baseaddr = address;
 	}
 
-	IIntuition->SetAttrs(DisassemblerListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_DISASSEMBLER_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
 	for (i = 0; i < max; i++)
 	{
 		char str[50];
@@ -118,7 +118,7 @@ void disassembler_makelist()
 			if ((uint32) (address - current_function->address) >= current_function->size)
 				break;
 	}
-	IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, mainwin, NULL,
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_DISASSEMBLER_LISTBROWSER], mainwin, NULL,
 												LISTBROWSER_Labels, &disassembly_list,
 												TAG_END);
 	disassembler_show_selected();
@@ -136,9 +136,9 @@ void disassembler_cleanup()
 
 void disassembler_clear()
 {
-	IIntuition->SetAttrs(DisassemblerListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_DISASSEMBLER_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
 	IListBrowser->FreeListBrowserList(&disassembly_list);
-	IIntuition->SetGadgetAttrs((struct Gadget *)DisassemblerListBrowserObj, mainwin, NULL,
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_DISASSEMBLER_LISTBROWSER], mainwin, NULL,
 												LISTBROWSER_Labels, &disassembly_list,
 												TAG_END);
 }

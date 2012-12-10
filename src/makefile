@@ -36,7 +36,7 @@ hexview.o: hexview.c hexview.h suspend.h symbols.h freemem.h
 main.o: main.c suspend.h gui.h breakpoints.h freemem.h
 	$(CC) -c -gstabs -o main.o main.c
 
-stabs.o: stabs.c stabs.h suspend.h freemem.h
+stabs.o: stabs.c stabs.h suspend.h freemem.h symbols.h
 	$(CC) -c -gstabs -o stabs.o stabs.c
 
 variables.o: variables.c variables.h suspend.h stabs.h gui.h freemem.h
@@ -51,7 +51,7 @@ breakpoints.o: breakpoints.c breakpoints.h suspend.h gui.h stabs.h
 stacktrace.o: stacktrace.c stacktrace.h suspend.h stabs.h gui.h freemem.h
 	$(CC) -c -gstabs -o stacktrace.o stacktrace.c
 
-attach.o: attach.c attach.h freemem.h
+attach.o: attach.c attach.h freemem.h console.h
 	$(CC) -c -gstabs -o attach.o attach.c
 
 breakpointswindow.o: breakpointswindow.c breakpointswindow.h stabs.h suspend.h
@@ -63,10 +63,10 @@ freemem.o: freemem.c freemem.h
 arexxport.o: arexxport.c arexxport.h suspend.h breakpoints.h gui.h
 	$(CC) -c -gstabs -o arexxport.o arexxport.c
 
-console.o: console.c console.h freemem.h
+console.o: console.c console.h freemem.h gui.h
 	$(CC) -c -gstabs -o console.o console.c
 
-source.o: source.c source.h freemem.h stabs.h breakpoints.h
+source.o: source.c source.h freemem.h console.h stabs.h gui.h breakpoints.h
 	$(CC) -c -gstabs -o source.o source.c
 
 pipe.o: pipe.c pipe.h
@@ -75,10 +75,10 @@ pipe.o: pipe.c pipe.h
 async.o: async.c async.h
 	$(CC) -c -gstabs -o async.o async.c
 
-sourcelist.o: sourcelist.c sourcelist.h
+sourcelist.o: sourcelist.c sourcelist.h source.h freemem.h console.h stabs.h gui.h
 	$(CC) -c -gstabs -o sourcelist.o sourcelist.c
 
-signalswindow.o: signalswindow.c signalswindow.h
+signalswindow.o: signalswindow.c signalswindow.h suspend.h
 	$(CC) -c -gstabs -o signalswindow.o signalswindow.c
 
 setbreak.o: setbreak.s

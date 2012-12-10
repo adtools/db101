@@ -1,4 +1,5 @@
 #include <exec/types.h>
+#include <dos/dos.h>
 #include <libraries/elf.h>
 
 extern int load_inferior(char *, char *, char *);
@@ -6,10 +7,14 @@ extern BOOL play(void);
 extern void pause(void);
 extern void step(void);
 extern void into(void);
+extern void out(void);
 extern void asmstep(void);
 extern void asmskip(void);
 extern void killtask(void);
 extern void crash(void);
+
+BOOL attach();
+void detach();
 
 int memory_insert_breakpoint(uint32, uint32 *);
 int memory_remove_breakpoint(uint32, uint32 *);
@@ -21,7 +26,8 @@ extern BOOL arrived_at_breakpoint;
 extern ULONG debug_sigfield;
 extern ULONG debug_data;
 
-struct Process *process;
+extern struct Process *process;
+extern BPTR exec_seglist;
 extern Elf32_Handle exec_elfhandle;
 extern Elf32_Addr code_elf_addr;
 extern int code_size;

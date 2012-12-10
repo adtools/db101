@@ -10,6 +10,10 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/elf.h>
+#include <proto/intuition.h>
+#include <proto/requester.h>
+
+#include <classes/requester.h>
 
 #include <exec/types.h>
 #include <exec/interrupts.h>
@@ -75,7 +79,7 @@ BOOL task_playing = FALSE;
 BOOL wants_to_crash = FALSE;
 BOOL should_continue = FALSE;
 BOOL catch_sline = FALSE;
-
+BOOL stepping_out = FALSE;
 
 void init()
 {
@@ -126,9 +130,9 @@ void remove_hook()
 }
 
 
-int amigaos_relocate_elfhandle ()
+int amigaos_relocate_elfhandle (Elf32_Handle elfhandle)
 {
-    Elf32_Handle hElf = (Elf32_Handle)exec_elfhandle;
+    Elf32_Handle hElf = elfhandle;
     Elf32_Shdr *pHeader;
     int i;
     uint32 nSecs;
@@ -210,13 +214,40 @@ int amigaos_relocate_elfhandle ()
     }
 }
 
+extern struct Window *mainwin;
+
+BOOL ask_if_retryelf()
+{
+	Object *reqobj;
+
+	reqobj = (Object *)IIntuition->NewObject( IRequester->REQUESTER_GetClass(), NULL,
+            									REQ_Type,       REQTYPE_INFO,
+												REQ_TitleText,  "ATTENTION!!!",
+									            REQ_BodyText,   "DOS failed to get an elfhandle, do you want to retry?",
+									            //REQ_Image,      REQ_IMAGE,
+												//REQ_TimeOutSecs, 10,
+									            REQ_GadgetText, "Retry|Cancel",
+									            TAG_END
+        );
+
+	uint32 code = TRUE;
+	if ( reqobj )
+	{
+		IIntuition->IDoMethod( reqobj, RM_OPENREQ, NULL, mainwin, NULL, TAG_END );
+		IIntuition->GetAttr(REQ_ReturnCode, reqobj, &code);
+		IIntuition->DisposeObject( reqobj );
+	}
+
+	return code;
+}
+
 BOOL 
-amigaos_attach (struct Process *aprocess)
+attach (struct Process *aprocess)
 {
     /* Can only debug processes right now */
     if (aprocess->pr_Task.tc_Node.ln_Type != NT_PROCESS)
     {
-		printf ("Not a process!\n");
+		console_printf (OUTPUT_WARNING, "Not a process!");
 		return FALSE;
     }
 
@@ -229,17 +260,25 @@ amigaos_attach (struct Process *aprocess)
 		return FALSE;
     }
 
-
-    IDOS->GetSegListInfoTags(exec_seglist, 
+	BOOL done = FALSE;
+	while(!done)
+	{
+	    IDOS->GetSegListInfoTags(exec_seglist, 
 							 GSLI_ElfHandle, &exec_elfhandle,
 							 //GSLI_Native, &seglist,
 							 TAG_DONE);
-
-    if (!exec_elfhandle)
-    {
-		exec_seglist = 0;
-		console_printf(OUTPUT_WARNING, "Process is no ELF binary!\n");
-		return FALSE;
+		if(exec_elfhandle)
+			done = TRUE;
+		else
+    	{
+    		BOOL yes = ask_if_retryelf();
+    		if(!yes)
+    		{
+				exec_seglist = 0;
+				console_printf(OUTPUT_WARNING, "Process is no ELF binary!\n");
+				return FALSE;
+			}
+    	}
     }
 
 	process  = aprocess;
@@ -254,7 +293,8 @@ amigaos_attach (struct Process *aprocess)
 
 	task_exists = TRUE;
 	task_playing = FALSE;
-   
+    isattached = TRUE;
+    
     if(process->pr_Task.tc_State == TS_CRASHED)
     {
     	process->pr_Task.tc_State = TS_SUSPENDED;
@@ -263,21 +303,33 @@ amigaos_attach (struct Process *aprocess)
 	attach_hook();
 
 	IDebug->ReadTaskContext((struct Task *)process, &context_copy, RTCF_ALL);
-	IExec->Signal((struct Task *)me, debug_sigfield);
 
-	if (open_elfhandle() == 0)
+	if (!(exec_elfhandle = open_elfhandle(exec_seglist)))
 	{
-		killtask();
+		//killtask();
+		detach();
 		return FALSE;
 	}
-	if (amigaos_relocate_elfhandle() == -1)
+	if (amigaos_relocate_elfhandle(exec_elfhandle) == -1)
 	{
-		killtask();
+		//killtask();
+		detach();
 		return FALSE;
 	}
+	IExec->Signal((struct Task *)me, debug_sigfield);
 	return TRUE;
 }
 
+void detach()
+{
+	if(!task_playing)
+		play();
+	
+	remove_hook();
+	task_exists = FALSE;
+	task_playing = FALSE;
+	isattached = FALSE;
+}
 
 int load_inferior(char *filename, char *path, char *args)
 {
@@ -360,12 +412,12 @@ int load_inferior(char *filename, char *path, char *args)
 		ret = 0;
 	}
 
-	if (open_elfhandle() == 0)
+	if (!(exec_elfhandle = open_elfhandle(exec_seglist)))
 	{
 		killtask();
 		return -1;
 	}
-	if (amigaos_relocate_elfhandle() == -1)
+	if (amigaos_relocate_elfhandle(exec_elfhandle) == -1)
 	{
 		killtask();
 		return -1;
@@ -403,6 +455,11 @@ BOOL play()
 	return FALSE;
 }
 
+void read_task_context()
+{
+	IDebug->ReadTaskContext((struct Task *)process, &context_copy, RTCF_ALL);
+}
+
 void pause()
 {
 	if (task_exists)
@@ -410,6 +467,9 @@ void pause()
 		{
 			task_playing = FALSE;
 			IExec->SuspendTask ((struct Task *) process, 0L);
+			
+			read_task_context();
+			IExec->Signal((struct Task *)me, debug_sigfield);
 		}
 }
 
@@ -441,6 +501,13 @@ void into()
 	asmstep();
 }
 
+void out()
+{
+	stepping_out = TRUE;
+	stepout_install();
+	play();
+}
+
 void asmstep()
 {
 	if(task_exists)
@@ -448,11 +515,16 @@ void asmstep()
 		if (task_playing)
 			pause();
 
-		context_ptr->ip = context_copy.ip;
-
+		//context_ptr->ip = context_copy.ip;
+		dprintf("Writing task context...\n");
+		IDebug->WriteTaskContext((struct Task *)process, &context_copy, RTCF_STATE);
+		
+		dprintf("Installing asmstep...\n");
 		asmstep_install();
-
+		
+		dprintf("Restarting task...\n");
 		play();
+		dprintf("Done!\n");
 	}
 }
 
@@ -468,10 +540,6 @@ void asmskip()
 	}
 }
 
-void read_task_context()
-{
-	IDebug->ReadTaskContext((struct Task *)process, &context_copy, RTCF_ALL);
-}
 
 void killtask()
 {
@@ -479,11 +547,12 @@ void killtask()
 	{
 		IExec->SuspendTask ((struct Task *) process, 0L);
 
+		//it is unsafe to Remove a process in AmigaDOS
 		//if we attached to the process, RemTask is going to crash...
 		if (!isattached)
-			IExec->RemTask ((struct Task *)process);
+			; //IExec->RemTask ((struct Task *)process);
 		else
-			isattached = FALSE;
+			detach();
 
 		task_exists = FALSE;
 		task_playing = FALSE;
@@ -590,7 +659,11 @@ int memory_insert_breakpoint(uint32 addr, uint32 *buffer)
 		//*buffer = *(uint32 *)addr;
 		//*(uint32 *)addr = meth_start;	//insert asm("trap")
 		//dprintf("buffer: 0x%x meth_start: 0x%x addr:0x%x\n", *buffer, meth_start, addr);
-		*buffer = setbreak(addr, meth_start);
+		uint32 realaddr = (uint32)IMMU->GetPhysicalAddress((APTR)addr);
+		if(realaddr == 0x0)
+			realaddr = addr;
+dprintf("Setting bp at 0x%x\n", realaddr);
+		*buffer = setbreak(realaddr, meth_start);
 
 	/* Set old attributes again */
 	IMMU->SetMemoryAttrs((APTR)addr, 4, oldAttr);
@@ -622,7 +695,10 @@ int memory_remove_breakpoint(uint32 addr, uint32 *buffer)
 	IMMU->SetMemoryAttrs((APTR)addr, 4, MEMATTRF_READ_WRITE);
 	
 		//*(uint32 *)addr = *buffer;	//restore old instruction
-	uint32 realaddr = IMMU->GetPhysicalAddress(addr);
+	uint32 realaddr = (uint32)IMMU->GetPhysicalAddress((APTR)addr);
+		if(realaddr == 0x0)
+			realaddr = addr;
+
 	setbreak(realaddr, *buffer);
 
 	/* Set old attributes again */

@@ -14,7 +14,7 @@
 #include "freemem.h"
 #include "console.h"
 
-Object *ConsoleListBrowserObj;
+//Object *MainObj[GAD_CONSOLE_LISTBROWSER];
 struct List console_list;
 
 int console_freemem_hook = -1;
@@ -62,9 +62,9 @@ void console_cleanup()
 
 void console_clear()
 {
-	IIntuition->SetAttrs(ConsoleListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_CONSOLE_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
 	IListBrowser->FreeListBrowserList(&console_list);
-	IIntuition->SetGadgetAttrs((struct Gadget *)ConsoleListBrowserObj, mainwin, NULL,
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_CONSOLE_LISTBROWSER], mainwin, NULL,
 												LISTBROWSER_Labels, &console_list,
 												TAG_END);
 	freemem_clear(console_freemem_hook);
@@ -140,7 +140,7 @@ void console_printf(enum output_types type, char *fmt, ...)
 	vsnprintf(buffer, sizeof(buffer), fmt, args);
 	va_end(args);
 
-	IIntuition->SetAttrs(ConsoleListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_CONSOLE_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
 	struct Node *node;
 	char *str = freemem_strdup (console_freemem_hook, buffer);
 	if (node = IListBrowser->AllocListBrowserNode(1,
@@ -152,7 +152,7 @@ void console_printf(enum output_types type, char *fmt, ...)
         							{
 							            IExec->AddTail(&console_list, node);
 									}
-	IIntuition->SetGadgetAttrs((struct Gadget *)ConsoleListBrowserObj, mainwin, NULL,
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_CONSOLE_LISTBROWSER], mainwin, NULL,
 												LISTBROWSER_Labels, &console_list,
 												LISTBROWSER_Position, LBP_BOTTOM,
 												TAG_END);

@@ -4,6 +4,8 @@
 #define STABS_H
 
 #include <exec/lists.h>
+#include <libraries/elf.h>
+#include <dos/dos.h>
 
 extern char * stabs_get_function_for_address (uint32);
 
@@ -131,18 +133,17 @@ struct stab_sourcefile
 };
 
 
-extern void stabs_interpret_functions(void);
 extern struct stab_function *stabs_get_function_from_address (uint32);
 extern struct stab_function *stabs_get_function_from_name (char *);
 struct stab_function *stabs_sline_to_nline(char *, uint32, uint32 *);
 struct stab_sourcefile *stabs_get_sourcefile(char *);
-void stabs_interpret_functions(void);
-void stabs_interpret_typedefs(void);
-void stabs_interpret_globals(void);
-void stabs_free_functions(void);
-void stabs_free_typedefs(void);
-void stabs_free_globals(void);
+
+void stabs_interpret_functions(Elf32_Handle);
+void stabs_interpret_typedefs(Elf32_Handle);
+void stabs_interpret_globals(Elf32_Handle);
 void stabs_interpret_stabs(void);
+
+BOOL stabs_import_external(APTR);
 void stabs_free_stabs(void);
 
 extern char *stabs_strdup_strip(char *);

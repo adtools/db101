@@ -1,15 +1,24 @@
 /*breakpoints.c*/
 
 #include <proto/exec.h>
-
 #include <exec/lists.h>
+#include <proto/intuition.h>
+#include <proto/requester.h>
+#include <classes/requester.h>
+#include <dos/dos.h>
+
+#include <string.h>
+#include <stdio.h>
 
 #include "suspend.h"
 #include "breakpoints.h"
 #include "gui.h"
 #include "stabs.h"
+#include "freemem.h"
 
-#define dprintf(format...)	IExec->DebugPrintF(format)
+#define dprintf(format, args...) ((struct ExecIFace *)((*(struct ExecBase **)4)->MainInterface))->DebugPrintF("[%s] " format, __PRETTY_FUNCTION__ , ## args)
+
+extern struct Window *mainwin;
 
 extern BOOL is_readable_address (uint32);
 
@@ -167,12 +176,11 @@ int get_nline_from_address(uint32 addr)
 	for (i=0; i < f->numberoflines; i++)
 		if (f->address + f->line[i].adr == addr)
 			return i;
-
 	return -1;
 }
 
 
-void guess_line_in_function ()
+int guess_line_in_function ()
 {
 	if (!hasfunctioncontext)
 		return;
@@ -182,7 +190,7 @@ void guess_line_in_function ()
 	if (! (ip >= f->address && ip < f->address + f->size))
 	{
 		f->currentline = -1;
-		return;
+		return -1;
 	}
 
 	int i;
@@ -191,7 +199,7 @@ void guess_line_in_function ()
 		if ( ip >= f->address + f->line[i].adr && ip < f->address + f->line[i+1].adr)
 		{
 			f->currentline = i;
-			return;
+			return i;
 		}
 	}
 
@@ -215,7 +223,10 @@ BOOL breakpoint_function (char *fname)
 	struct stab_function *f = stabs_get_function_from_name(fname);
 	if(f)
 	{
-		insert_breakpoint (f->address, BR_NORMAL_FUNCTION, f, 0);
+		uint32 sline = 0;
+		if(f->line)
+			sline = f->line[0].infile;
+		insert_breakpoint (f->address, BR_NORMAL_FUNCTION, f, sline);
 		return TRUE;
 	}
 	return FALSE;
@@ -285,10 +296,33 @@ void free_breakpoints ()
 		next = IExec->GetSucc (node);
 		b = (struct breakpoint *)node;
 		IExec->Remove (node);
-		IExec->FreeMem (b, sizeof (struct breakpoint));		
+		IExec->FreeVec (b);		
 
 		node = next;
 	}
+}
+
+uint32 stepout_address, stepout_buffer;
+BOOL stepout_installed = FALSE;
+
+void stepout_install()
+{
+	stepout_address = context_copy.lr;
+	if((hasfunctioncontext && stabs_get_function_from_address(stepout_address) == current_function)
+		|| (stepout_address == context_copy.ip))
+	{	
+		uint32 *newstack = *(uint32**)context_copy.gpr[1];
+		stepout_address = *(++newstack);
+	}
+	memory_insert_breakpoint (stepout_address, &stepout_buffer);
+	stepout_installed = TRUE;
+}
+
+void stepout_remove()
+{
+	if(stepout_installed)
+		memory_remove_breakpoint(stepout_address, &stepout_buffer);
+	stepout_installed = FALSE;
 }
 
 /* general defines */
@@ -378,13 +412,24 @@ ppctype PPC_DisassembleBranchInstr(uint32 instr, int32 *reladdr)
 			switch (PPCGETIDX2(in))
 			{
 				case 16:
+				{
 					//return branch(dp,in,"lr",0,0);  /* bclr */
-					return PPC_BRANCHTOLINK;
+					int bo = (int)PPCGETD(in);
+					if((bo & 4) && (bo & 16))
+						return PPC_BRANCHTOLINK;
+					else
+						return PPC_BRANCHTOLINKCOND;
+				}
 
 				case 528:
+				{
 					//return branch(dp,in,"ctr",0,0);  /* bcctr */
-					return PPC_BRANCHTOCTR;
-					
+					int bo = (int)PPCGETD(in);
+					if((bo & 4) && (bo & 16))
+						return PPC_BRANCHTOCTR;
+					else
+						return PPC_BRANCHTOCTRCOND;
+				}	
 				default:
 					return PPC_OTHER;
 			}
@@ -392,6 +437,185 @@ ppctype PPC_DisassembleBranchInstr(uint32 instr, int32 *reladdr)
 		default:
 			return PPC_OTHER;
 	}
+}
+
+extern struct MMUIFace *IMMU;
+
+struct Hook tracking_hook;
+struct tmsg
+{
+	char path[1024];
+	BPTR seglist;
+} tracking_msg;
+
+struct List tracking_list;
+int tracking_freemem_hook = -1;
+
+struct tracking_list_entry
+{
+	struct Node node;
+	char *path;
+	BOOL isallowed;
+};
+
+int32 tracking_hook_func(struct Hook *hook, APTR address, struct FindTrackedAddressMsg *ftam)
+{
+	struct tmsg *msg = (struct tmsg *)hook->h_Data;
+	strcpy(msg->path, ftam->ftam_Name);
+	msg->seglist = (BPTR)ftam->ftam_Segment;
+	
+    dprintf("ftam_Segment = 0x%x, ftam_SegmentNumber = 0x%x, ftam_SegmentOffset = 0x%x\n",
+            ftam->ftam_Segment, ftam->ftam_SegmentNumber, ftam->ftam_SegmentOffset);
+    dprintf("ftam_Name = %s\n", ftam->ftam_Name ? ftam->ftam_Name : "<unknown>");
+
+	
+	return FALSE;
+}
+
+static int
+strlcmp(const char *s, const char *t, size_t n)
+{
+	while (n-- && *t != '\0')
+		if (*s != *t)
+			return ((unsigned char)*s - (unsigned char)*t);
+		else
+ 			++s, ++t;
+	return ((unsigned char)*s);
+}
+
+void tracking_init()
+{
+	IExec->NewList(&tracking_list);
+	tracking_freemem_hook = freemem_alloc_hook();
+}
+
+void tracking_cleanup()
+{
+	freemem_free_hook(tracking_freemem_hook);
+}
+
+void tracking_clear()
+{
+	freemem_clear(tracking_freemem_hook);
+	IExec->NewList(&tracking_list);
+}
+
+struct tracking_list_entry *tracking_lookup(char *path)
+{
+	struct tracking_list_entry *n = (struct tracking_list_entry *)IExec->GetHead(&tracking_list);
+	while(n)
+	{
+		if(strcmp(path, n->path) == 0)
+			return n;
+		n = (struct tracking_list_entry *)IExec->GetSucc((struct Node *)n);
+	}
+	return NULL;
+}
+
+char bodystring[1024];
+BOOL ask_if_allowed(char *name)
+{
+	Object *reqobj;
+
+	sprintf(bodystring, "You are about to asmstep into the unknown segment \"%s\". This is NOT allowed in the current version!", name);
+
+	reqobj = (Object *)IIntuition->NewObject( IRequester->REQUESTER_GetClass(), NULL,
+            									REQ_Type,       REQTYPE_INFO,
+												REQ_TitleText,  "ATTENTION!!!",
+									            REQ_BodyText,   bodystring,
+									            //REQ_Image,      REQ_IMAGE,
+												//REQ_TimeOutSecs, 10,
+									            REQ_GadgetText, "OK",
+									            TAG_END
+        );
+
+	uint32 code = TRUE;
+	if ( reqobj )
+	{
+		IIntuition->IDoMethod( reqobj, RM_OPENREQ, NULL, mainwin, NULL, TAG_END );
+		//IIntuition->GetAttr(REQ_ReturnCode, reqobj, &code);
+		IIntuition->DisposeObject( reqobj );
+	}
+
+	//return !code;
+	return FALSE;
+}
+
+branch is_branch_allowed()
+{
+	int32 offset;
+	uint32 baddr;
+	branch type = NOBRANCH;
+	switch(PPC_DisassembleBranchInstr(*(uint32 *)context_copy.ip, &offset))
+	{
+		case PPC_OTHER:
+			return NOBRANCH;
+		case PPC_BRANCHTOLINK:
+			baddr = context_copy.lr;
+			type = NORMALBRANCH;
+			break;
+		case PPC_BRANCHTOLINKCOND:
+			baddr = context_copy.lr;
+			type = NORMALBRANCHCOND;
+			break;
+		case PPC_BRANCHTOCTR:
+			baddr = context_copy.ctr;
+			type = NORMALBRANCH;
+			break;
+		case PPC_BRANCHTOCTRCOND:
+			baddr = context_copy.ctr;
+			type = NORMALBRANCHCOND;
+			break;
+		case PPC_BRANCHCOND:
+			baddr = context_copy.ip + offset;
+			type = NORMALBRANCHCOND;
+			break;
+		case PPC_BRANCH:
+			baddr = context_copy.ip + offset;
+			type = NORMALBRANCH;
+			break;
+	}
+
+	tracking_hook.h_Entry = (ULONG (*)())tracking_hook_func;
+	tracking_hook.h_Data = (APTR)&tracking_msg;
+	IDOS->FindTrackedAddress((CONST_APTR)baddr, &tracking_hook);
+
+	if(tracking_msg.seglist == exec_seglist)
+		return type;
+		
+	struct tracking_list_entry *n = tracking_lookup(tracking_msg.path);
+	if(!n)
+	{
+		n = freemem_malloc(tracking_freemem_hook, sizeof(struct tracking_list_entry));
+		n->path = freemem_strdup(tracking_freemem_hook, tracking_msg.path);
+		if(ask_if_allowed(n->path))
+		{
+			//if(n->seglist != 0x0 && strlcmp("Kickstart", tracking_msg.path, 9)) //if not kickstart
+			if(stabs_import_external((APTR)baddr))
+				n->isallowed = TRUE;
+			else
+				n->isallowed = FALSE;
+		}
+		else
+			n->isallowed = FALSE;
+		IExec->AddTail(&tracking_list, (struct Node *)n);
+	}
+
+	if(n->isallowed)
+	{
+		if(type == NORMALBRANCH)
+			type = ALLOWEDBRANCH;
+		if(type == NORMALBRANCHCOND)
+			type = ALLOWEDBRANCHCOND;
+	}
+	else
+	{
+		if(type == NORMALBRANCH)
+			type = DISALLOWEDBRANCH;
+		if(type == NORMALBRANCHCOND)
+			type = DISALLOWEDBRANCHCOND;
+	}
+	return type;
 }
 
 BOOL asm_trace = FALSE;
@@ -434,8 +658,11 @@ void asmstep_install()
 				no_asm_breaks = 2;
 				asmstep_addr[1] = context_copy.ctr;
 				break;
-			case PPC_BRANCHCOND:
 			case PPC_BRANCH:
+				no_asm_breaks = 1;
+				asmstep_addr[0] = context_copy.ip + offset;
+				break;
+			case PPC_BRANCHCOND:
 				no_asm_breaks = 2;
 				asmstep_addr[1] = context_copy.ip + offset;
 				break;
@@ -449,7 +676,7 @@ void asmstep_install()
 			{
 				asmtrace_should_restore[i] = FALSE;
 			}
-#if 1
+#if 0
 			else if(!is_readable_address(asmstep_addr[i]))
 			{
 				asmtrace_should_restore[i] = FALSE;

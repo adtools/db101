@@ -40,7 +40,7 @@
 #include "freemem.h"
 #include "variables.h"
 
-Object *StacktraceListBrowserObj;
+//Object *StacktraceListBrowserObj;
 struct List stacktrace_list;
 
 extern struct Window *mainwin;
@@ -67,7 +67,7 @@ void stacktrace_clear()
 {
 	IListBrowser->FreeListBrowserList(&stacktrace_list);	
 	freemem_clear(stacktrace_freemem_hook);
-	IIntuition->RefreshGadgets ((struct Gadget *)StacktraceListBrowserObj, mainwin, NULL);
+	IIntuition->RefreshGadgets ((struct Gadget *)MainObj[GAD_STACKTRACE_LISTBROWSER], mainwin, NULL);
 }
 
 void stacktrace_update()
@@ -85,7 +85,7 @@ void stacktrace_update()
 	uint32 stackpointer = context_copy.gpr[1]; //(uint32)t->tc_SPReg;
 
 	uint32 p = stackpointer;
-	IIntuition->SetAttrs(StacktraceListBrowserObj, LISTBROWSER_Labels, ~0, TAG_DONE);
+	IIntuition->SetAttrs(MainObj[GAD_STACKTRACE_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
 	int i = 0;
 	while (p < stackupper-28)
 	{
@@ -124,5 +124,5 @@ void stacktrace_update()
 		else
 			p = stackupper-28;
 	}
-	IIntuition->SetGadgetAttrs((struct Gadget *)StacktraceListBrowserObj, mainwin, NULL, LISTBROWSER_Labels, &stacktrace_list, TAG_END);
+	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_STACKTRACE_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &stacktrace_list, TAG_END);
 }

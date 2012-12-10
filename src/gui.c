@@ -14,7 +14,7 @@
 #include <proto/space.h>
 #include <proto/clicktab.h>
 #include <proto/arexx.h>
-#include <proto/string.h>
+#include <proto/gadtools.h>
 
 #include <classes/window.h>
 #include <classes/requester.h>
@@ -27,6 +27,7 @@
 #include <gadgets/string.h>
 
 #include <reaction/reaction_macros.h>
+#include <intuition/classusr.h>
 
 #include <libraries/asl.h>
 #include <interfaces/asl.h>
@@ -34,6 +35,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <malloc.h>
+#include <stdarg.h>
 
 #include "suspend.h"
 #include "stabs.h"
@@ -54,33 +56,6 @@
 
 #define dprintf(format...)	IExec->DebugPrintF(format)
 
-enum
-{
-    GAD_FILENAME_BUTTON = 1,
-    GAD_RELOAD_BUTTON,
-	GAD_ATTACH_BUTTON,
-	GAD_START_BUTTON,
-	GAD_PAUSE_BUTTON,
-	GAD_STEPOVER_BUTTON,
-	GAD_STEPINTO_BUTTON,
-	GAD_KILL_BUTTON,
-	GAD_CRASH_BUTTON,
-	GAD_SETBREAK_BUTTON,
-	GAD_HEX_BUTTON,
-	GAD_VARIABLES_LISTBROWSER,
-	GAD_STACKTRACE_LISTBROWSER,
-	GAD_SOURCE_LISTBROWSER,
-	GAD_DISASSEMBLER_LISTBROWSER,
-	GAD_DISASSEMBLER_STEP_BUTTON,
-	GAD_DISASSEMBLER_SKIP_BUTTON,
-	GAD_SOURCELIST_LISTBROWSER,
-	GAD_CONSOLE_LISTBROWSER,
-	GAD_AREXX_STRING,
-	GAD_AREXX_BUTTON,
-	GAD_SIGNAL_BUTTON,
-	GAD_X_BUTTON,
-	GAD_TEXT
-};
 
 extern struct List variable_list;
 extern struct List stacktrace_list;
@@ -97,25 +72,23 @@ struct Window *mainwin;
 Object *MainWinObj;
 BOOL main_window_is_open = FALSE;
 
-Object *SelectButtonObj, *ReloadButtonObj, *FilenameStringObj, *AttachButtonObj;
-Object *StartButtonObj, *PauseButtonObj, *StepOverButtonObj, *StepIntoButtonObj, *KillButtonObj, *CrashButtonObj, *SetBreakButtonObj, *XButtonObj;
-Object *HexviewButtonObj, *DisassembleviewButtonObj, *StacktraceButtonObj;
-Object *ArexxButtonObj, *ArexxStringObj, *arexx_obj;
-Object *SourcelistListBrowserObj;
-Object *ClickTabObj;
-Object *SignalButtonObj;
-extern Object *VariablesListBrowserObj, *StacktraceListBrowserObj, *DisassemblerListBrowserObj, *ConsoleListBrowserObj, *SourceListBrowserObj;
-extern Object *DisassemblerStepButtonObj, *DisassemblerSkipButtonObj;
+Object *arexx_obj;
+Object *MainObj[GAD_NUM];
 
-char lastdir[1024] = ""; //work:code/medium/StangTennis2D";  "qt:examples/widgets/calculator"; 
+struct MsgPort *AppPort = NULL;
+
+char lastdir[1024] =  "";  //"qt:examples/widgets/calculator"; //work:code/medium/StangTennis2D";  
 char filename[1024] = "";
 char childpath[1024] = "";
+char childfullpath[1024] = "";
 
 struct stab_function *current_function = NULL;
 struct stab_function *old_function = NULL;
 BOOL hasfunctioncontext = FALSE;
 BOOL isattached = FALSE;
+BOOL button_isattach = TRUE;
 extern BOOL catch_sline;
+extern BOOL stepping_out;
 extern BOOL has_tracebit;
 
 int main_freemem_hook = -1;
@@ -124,7 +97,7 @@ char *request_file (struct Window *win, char **path)
 {
 	struct FileRequester *req = IAsl->AllocAslRequestTags(ASL_FileRequest,
 													  ASLFR_Window, win,
-													  ASLFR_TitleText, "Hello world!",
+													  ASLFR_TitleText, "Select executable",
 													  ASLFR_InitialDrawer, lastdir,
 													  TAG_DONE);
 	char *ret;
@@ -158,32 +131,54 @@ char *request_file (struct Window *win, char **path)
 	return ret;
 }
 
-char * request_arguments()
+char * child_full_path()
+{
+	int len = strlen(childpath);
+	if(len == 0)
+		strcpy(childfullpath, filename);
+	else
+	{
+		char c = childpath[len];
+		switch(c)
+		{
+			case ':':
+			case '/':
+				sprintf(childfullpath, "%s%s", childpath, filename);
+			default:
+				sprintf(childfullpath, "%s/%s", childpath, filename);
+		}
+	}
+	return childfullpath;
+}
+
+BOOL request_arguments(char **ret)
 {
 	Object *reqobj;
 
-	char *ret = freemem_malloc(main_freemem_hook, 1024);	
+	*ret = freemem_malloc(main_freemem_hook, 1024);	
 
 	reqobj = (Object *)IIntuition->NewObject( IRequester->REQUESTER_GetClass(), NULL,
             									REQ_Type,       REQTYPE_STRING,
 												REQ_TitleText,  "Specify arguments",
-												REQS_Buffer,	ret,
+												REQS_Buffer,	*ret,
 												REQS_MaxChars,	1024,
 												REQS_AllowEmpty, TRUE,
 									            REQ_BodyText,   "Please specify command arguments",
 									            //REQ_Image,      REQ_IMAGE,
 												//REQ_TimeOutSecs, 10,
-									            REQ_GadgetText, "Ok",
+									            REQ_GadgetText, "Ok|Cancel",
 									            TAG_END
         );
 
+	uint32 code = TRUE;
 	if ( reqobj )
 	{
 		IIntuition->IDoMethod( reqobj, RM_OPENREQ, NULL, mainwin, NULL, TAG_END );
+		IIntuition->GetAttr(REQ_ReturnCode, reqobj, &code);
 		IIntuition->DisposeObject( reqobj );
 	}
 
-	return ret;
+	return code;
 }
 
 
@@ -192,6 +187,61 @@ void button_setdisabled (Object *g, BOOL disabled)
 	IIntuition->SetGadgetAttrs((struct Gadget *)g, mainwin, NULL,
 												GA_Disabled, disabled,
 												TAG_DONE);
+}
+
+void enable(BOOL able, ULONG tags, ...)
+{
+	va_list args;
+	ULONG tag = tags;
+#ifdef __amigaos4__
+	va_startlinear(args, tags);
+#else
+	va_start(args, tags);
+#endif
+	while( tag != TAG_END )
+	{
+		button_setdisabled(MainObj[tag], !able);
+		tag = va_arg(args, ULONG);
+	}
+	va_end(args);
+}
+
+BOOL button_is_start = FALSE;
+
+void button_set_start()
+{
+	if(!button_is_start)
+		IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_START_BUTTON], mainwin, NULL,
+												GA_Text, "Start",
+												TAG_DONE);
+	button_is_start = TRUE;
+}
+
+void button_set_continue()
+{
+	if(button_is_start)
+		IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_START_BUTTON], mainwin, NULL,
+												GA_Text, "Continue",
+												TAG_DONE);
+	button_is_start = FALSE;
+}
+
+void button_set_attach()
+{
+	if(!button_isattach)
+		IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_ATTACH_BUTTON], mainwin, NULL,
+												GA_Text, "Attach",
+												TAG_DONE);
+	button_isattach = TRUE;
+}
+
+void button_set_detach()
+{
+	if(button_isattach)
+		IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_ATTACH_BUTTON], mainwin, NULL,
+												GA_Text, "Detach",
+												TAG_DONE);
+	button_isattach = FALSE;
 }
 
 uint32 main_obtain_window_signal()
@@ -215,6 +265,9 @@ uint32 obtain_all_signals()
 	signal |= sigwin_obtain_signal();
 	signal |= debug_sigfield;
 
+   if( AppPort )
+      signal |= 1L << AppPort->mp_SigBit;
+
 	return signal;
 }
 
@@ -224,19 +277,30 @@ void main_open_window()
 {
 	main_freemem_hook = freemem_alloc_hook();
 
-	locals_init();
+	variables_init();
 	console_init();
 	stacktrace_init();
 	source_init();
 	disassembler_init();
 	sourcelist_init();
 	
+	tracking_init();
 	pipe_init();
+	
+	static struct NewMenu mynewmenu[] =
+	{
+	    { NM_TITLE, "File", 0, 0, 0, 0},
+    	{ NM_ITEM, "About...", 0, 0, 0, 0 },
+    	{ NM_ITEM, "Quit", 0, 0, 0 },
+    	{ NM_END, NULL, 0, 0, 0, 0}
+    };
+
+   AppPort = IExec->AllocSysObjectTags(ASOT_PORT, TAG_DONE);
 
     /* Create the window object. */
     if(( MainWinObj = WindowObject,
             WA_ScreenTitle, "Debug 101",
-            WA_Title, "Debug 101 v1.0.0 BETA",
+            WA_Title, "Debug 101 v1.0.0",
             WA_Width, 1024,
 			WA_Height, 768,
             WA_DepthGadget, TRUE,
@@ -244,22 +308,30 @@ void main_open_window()
             WA_DragBar, TRUE,
             WA_CloseGadget, TRUE,
             WA_Activate, TRUE,
+            
+            WINDOW_NewMenu, mynewmenu,
+            WINDOW_MenuUserData, WGUD_IGNORE,
+            
+            WINDOW_IconifyGadget, TRUE,
+            WINDOW_IconTitle, "Debug 101",
+            WINDOW_AppPort, AppPort,
+            
             WINDOW_Position, WPOS_CENTERSCREEN,
             /* there is no HintInfo array set up here, instead we define the 
             ** strings directly when each gadget is created (OM_NEW)
             */
             WINDOW_GadgetHelp, TRUE,
-	        WINDOW_ParentGroup, VLayoutObject,
+	        WINDOW_ParentGroup, MainObj[GAD_TOPLAYOUT] = VLayoutObject,
 				LAYOUT_AddChild, HLayoutObject,
-	                LAYOUT_AddChild, SelectButtonObj = ButtonObject,
-	                    GA_ID, GAD_FILENAME_BUTTON,
+	                LAYOUT_AddChild, MainObj[GAD_SELECT_BUTTON] = ButtonObject,
+	                    GA_ID, GAD_SELECT_BUTTON,
 	                    GA_Text, "Select file",
 	                    GA_RelVerify, TRUE,
 	                    GA_HintInfo, "Push to select file",
 	                ButtonEnd,
 	                CHILD_WeightedWidth, 0,
 	                
-	                LAYOUT_AddChild, ReloadButtonObj = ButtonObject,
+	                LAYOUT_AddChild, MainObj[GAD_RELOAD_BUTTON] = ButtonObject,
 	                	GA_ID, GAD_RELOAD_BUTTON,
 	                	GA_Text, "Reload",
 	                	GA_RelVerify, TRUE,
@@ -268,8 +340,8 @@ void main_open_window()
 	                ButtonEnd,
 	                CHILD_WeightedWidth, 0,
 	                
-	                LAYOUT_AddChild, FilenameStringObj = StringObject,
-	                    GA_ID, GAD_TEXT,
+	                LAYOUT_AddChild, MainObj[GAD_FILENAME_STRING] = StringObject,
+	                    GA_ID, GAD_FILENAME_STRING,
 	                    GA_RelVerify, TRUE,
 	                    GA_HintInfo, "Filename",
 						GA_Disabled, TRUE,
@@ -278,7 +350,7 @@ void main_open_window()
 						STRINGA_TextVal, "Select File",
 	                StringEnd,
 
-	                LAYOUT_AddChild, AttachButtonObj = ButtonObject,
+	                LAYOUT_AddChild, MainObj[GAD_ATTACH_BUTTON] = ButtonObject,
 	                    GA_ID, GAD_ATTACH_BUTTON,
 	                    GA_Text, "Attach",
 	                    GA_RelVerify, TRUE,
@@ -290,15 +362,15 @@ void main_open_window()
 						SPACE_MinWidth, 24,
 					SpaceEnd,
 					
-					LAYOUT_AddChild, StartButtonObj = ButtonObject,
+					LAYOUT_AddChild, MainObj[GAD_START_BUTTON] = ButtonObject,
 						GA_ID, GAD_START_BUTTON,
 	                    GA_RelVerify, TRUE,
-						GA_Text, "Start",
+						GA_Text, "Continue",
 						GA_Disabled, TRUE,
 					ButtonEnd,
 	                CHILD_WeightedHeight, 0,
 	                
-					LAYOUT_AddChild, PauseButtonObj = ButtonObject,
+					LAYOUT_AddChild, MainObj[GAD_PAUSE_BUTTON] = ButtonObject,
 						GA_ID, GAD_PAUSE_BUTTON,
 	                    GA_RelVerify, TRUE,
 						GA_Text, "Pause",
@@ -306,7 +378,7 @@ void main_open_window()
 					ButtonEnd,
 	                CHILD_WeightedHeight, 0,
 	                
-					LAYOUT_AddChild, KillButtonObj = ButtonObject,
+					LAYOUT_AddChild, MainObj[GAD_KILL_BUTTON] = ButtonObject,
 						GA_ID, GAD_KILL_BUTTON,
 	                    GA_RelVerify, TRUE,
 						GA_Text, "Kill",
@@ -322,7 +394,7 @@ void main_open_window()
 					ButtonEnd,
 	                CHILD_WeightedHeight, 0,
 #endif
-					LAYOUT_AddChild, StepOverButtonObj = ButtonObject,
+					LAYOUT_AddChild, MainObj[GAD_STEPOVER_BUTTON] = ButtonObject,
 						GA_ID, GAD_STEPOVER_BUTTON,
 	                    GA_RelVerify, TRUE,
 						GA_Text, "Step Over",
@@ -330,7 +402,7 @@ void main_open_window()
 					ButtonEnd,
 	                CHILD_WeightedHeight, 0,
 	                
-					LAYOUT_AddChild, StepIntoButtonObj = ButtonObject,
+					LAYOUT_AddChild, MainObj[GAD_STEPINTO_BUTTON] = ButtonObject,
 						GA_ID, GAD_STEPINTO_BUTTON,
 	                    GA_RelVerify, TRUE,
 						GA_Text, "Step Into",
@@ -338,11 +410,19 @@ void main_open_window()
 					ButtonEnd,
 	                CHILD_WeightedHeight, 0,
 	                
+					LAYOUT_AddChild, MainObj[GAD_STEPOUT_BUTTON] = ButtonObject,
+						GA_ID, GAD_STEPOUT_BUTTON,
+	                    GA_RelVerify, TRUE,
+						GA_Text, "Step Out",
+						GA_Disabled, TRUE,
+					ButtonEnd,
+	                CHILD_WeightedHeight, 0,
+	                	                
 					LAYOUT_AddChild, SpaceObject,
 						SPACE_MinWidth, 24,
 					SpaceEnd,
 					
-					LAYOUT_AddChild, SetBreakButtonObj = ButtonObject,
+					LAYOUT_AddChild, MainObj[GAD_SETBREAK_BUTTON] = ButtonObject,
 						GA_ID, GAD_SETBREAK_BUTTON,
 	                    GA_RelVerify, TRUE,
 						GA_Text, "Breaks",
@@ -350,7 +430,7 @@ void main_open_window()
 					ButtonEnd,
 	                CHILD_WeightedHeight, 0,
 
-					LAYOUT_AddChild, HexviewButtonObj = ButtonObject,
+					LAYOUT_AddChild, MainObj[GAD_HEX_BUTTON] = ButtonObject,
 						GA_ID, GAD_HEX_BUTTON,
 	                    GA_RelVerify, TRUE,
 						GA_Text, "Hex",
@@ -362,7 +442,7 @@ void main_open_window()
 				CHILD_WeightedHeight, 0,
 
 				LAYOUT_AddChild, HLayoutObject,
-		            LAYOUT_AddChild, StacktraceListBrowserObj = ListBrowserObject,
+		            LAYOUT_AddChild, MainObj[GAD_STACKTRACE_LISTBROWSER] = ListBrowserObject,
 	    	            GA_ID,                     GAD_STACKTRACE_LISTBROWSER,
 	        	        GA_RelVerify,              TRUE,
 	            	    GA_TabCycle,               TRUE,
@@ -374,7 +454,7 @@ void main_open_window()
 	                    LISTBROWSER_Striping,      LBS_ROWS,
 					ListBrowserEnd,
 				
-	                LAYOUT_AddChild, VariablesListBrowserObj = ListBrowserObject,
+	                LAYOUT_AddChild, MainObj[GAD_VARIABLES_LISTBROWSER] = ListBrowserObject,
     	                GA_ID,                      GAD_VARIABLES_LISTBROWSER,
         	            GA_RelVerify,               TRUE,
 	                    GA_TabCycle,                TRUE,
@@ -391,7 +471,7 @@ void main_open_window()
 	            EndMember,
 	            
 	            LAYOUT_AddChild, HLayoutObject,
-		            LAYOUT_AddChild, ClickTabObj = ClickTabObject,
+		            LAYOUT_AddChild, MainObj[GAD_CLICKTAB] = ClickTabObject,
 		            	GA_Text, PageLabels_1,
 
 		            	CLICKTAB_Current,	0,
@@ -399,7 +479,7 @@ void main_open_window()
 				    		PAGE_Add, VLayoutObject,
 				    			//LAYOUT_SpaceOuter,	TRUE,
 				    			//LAYOUT_DeferLayout,	TRUE,
-				    			LAYOUT_AddChild, SourceListBrowserObj = ListBrowserObject,
+				    			LAYOUT_AddChild, MainObj[GAD_SOURCE_LISTBROWSER] = ListBrowserObject,
 				    	        	GA_ID,                     GAD_SOURCE_LISTBROWSER,
 		        			    	GA_RelVerify,              TRUE,
 		            				GA_TabCycle,               TRUE,
@@ -413,7 +493,7 @@ void main_open_window()
 							EndMember,
 						
 							PAGE_Add, VLayoutObject,
-								LAYOUT_AddChild, DisassemblerListBrowserObj = ListBrowserObject,
+								LAYOUT_AddChild, MainObj[GAD_DISASSEMBLER_LISTBROWSER] = ListBrowserObject,
 			    	        	    GA_ID,                     GAD_DISASSEMBLER_LISTBROWSER,
 	    		    	    	    GA_RelVerify,              TRUE,
 	        		    		    GA_TabCycle,               TRUE,
@@ -425,14 +505,14 @@ void main_open_window()
 								ListBrowserEnd,
 							
 								LAYOUT_AddChild, HLayoutObject,
-									LAYOUT_AddChild, DisassemblerStepButtonObj = ButtonObject,
+									LAYOUT_AddChild, MainObj[GAD_DISASSEMBLER_STEP_BUTTON] = ButtonObject,
 	    	            			    GA_ID, GAD_DISASSEMBLER_STEP_BUTTON,
 										GA_RelVerify, TRUE,
 	            	    			    GA_Text, "Step",
 	            			    	ButtonEnd,
 				                	CHILD_WeightedHeight, 0,
 
-		                			LAYOUT_AddChild, DisassemblerSkipButtonObj = ButtonObject,
+		                			LAYOUT_AddChild, MainObj[GAD_DISASSEMBLER_SKIP_BUTTON] = ButtonObject,
 	    	            			    GA_ID, GAD_DISASSEMBLER_SKIP_BUTTON,
 										GA_RelVerify, TRUE,
 	            	        			GA_Text, "Skip",
@@ -445,7 +525,7 @@ void main_open_window()
 					EndMember,
 					
 					LAYOUT_WeightBar,	TRUE,
-					LAYOUT_AddChild, SourcelistListBrowserObj = ListBrowserObject,
+					LAYOUT_AddChild, MainObj[GAD_SOURCELIST_LISTBROWSER] = ListBrowserObject,
 						GA_ID,                     GAD_SOURCELIST_LISTBROWSER,
 	    		    	GA_RelVerify,              TRUE,
 	        		    GA_TabCycle,               TRUE,
@@ -458,7 +538,7 @@ void main_open_window()
 				EndMember,
 				
 				LAYOUT_AddChild, HLayoutObject,
-		            LAYOUT_AddChild, ConsoleListBrowserObj = ListBrowserObject,
+		            LAYOUT_AddChild, MainObj[GAD_CONSOLE_LISTBROWSER] = ListBrowserObject,
     		            GA_ID,                     GAD_CONSOLE_LISTBROWSER,
         		        GA_RelVerify,              TRUE,
             		    GA_TabCycle,               TRUE,
@@ -468,7 +548,7 @@ void main_open_window()
 				EndMember,
 				
 				LAYOUT_AddChild, HLayoutObject,
-	                LAYOUT_AddChild, ArexxStringObj = StringObject,
+	                LAYOUT_AddChild, MainObj[GAD_AREXX_STRING] = StringObject,
     	                GA_ID, GAD_AREXX_STRING,
         	            GA_RelVerify, TRUE,
 						GA_Disabled, FALSE,
@@ -476,7 +556,7 @@ void main_open_window()
 						STRINGA_TextVal, "",
         	        StringEnd,
 
-					LAYOUT_AddChild, ArexxButtonObj = ButtonObject,
+					LAYOUT_AddChild, MainObj[GAD_AREXX_BUTTON] = ButtonObject,
 						GA_ID, GAD_AREXX_BUTTON,
 	                    GA_RelVerify, TRUE,
 						GA_Text, "Send",
@@ -485,7 +565,7 @@ void main_open_window()
 	                CHILD_WeightedHeight, 0,
 	                CHILD_WeightedWidth, 0,
 	                
-	                LAYOUT_AddChild, SignalButtonObj = ButtonObject,
+	                LAYOUT_AddChild, MainObj[GAD_SIGNAL_BUTTON] = ButtonObject,
 						GA_ID, GAD_SIGNAL_BUTTON,
 	                    GA_RelVerify, TRUE,
 						GA_Text, "Signal",
@@ -494,7 +574,7 @@ void main_open_window()
 	                CHILD_WeightedHeight, 0,
 	                CHILD_WeightedWidth, 0,
 	                
-					LAYOUT_AddChild, XButtonObj = ButtonObject,
+					LAYOUT_AddChild, MainObj[GAD_X_BUTTON] = ButtonObject,
 						GA_ID, GAD_X_BUTTON,
 	                    GA_RelVerify, TRUE,
 						GA_Text, "X",
@@ -511,20 +591,40 @@ void main_open_window()
     {
         /*  Open the window. */
         if( mainwin = (struct Window *) RA_OpenWindow(MainWinObj) )
+        {
 			main_window_is_open = TRUE;
+			button_set_start();
+		}
 	}
 
 	return;
 }
 
 BOOL done = FALSE;
-#define    MSR_TRACE_ENABLE           0x00000400
+//#define    MSR_TRACE_ENABLE           0x00000400
+
+void show_disassembler()
+{
+	IIntuition->SetAttrs(MainObj[GAD_CLICKTAB],
+								CLICKTAB_Current, 1,
+								TAG_END);
+	IIntuition->IDoMethod(MainWinObj, WM_RETHINK);
+}
+
+void show_source()
+{
+	IIntuition->SetAttrs(MainObj[GAD_CLICKTAB],
+								CLICKTAB_Current, 0,
+								TAG_END);
+	IIntuition->IDoMethod(MainWinObj, WM_RETHINK);
+}
 
 void event_loop()
 {	
             ULONG wait, signal;
 			BOOL shouldplay = FALSE;
 			char *symbol = NULL;
+			branch branchallowed = NOBRANCH;
 
             /* Obtain the window wait signal mask. */
             //IIntuition->GetAttr( WINDOW_SigMask, MainWinObj, &signal );
@@ -536,7 +636,6 @@ void event_loop()
 
                 wait = IExec->Wait(signal|SIGBREAKF_CTRL_C|SIGF_CHILD);
                 								
-    	
                 if (wait & SIGBREAKF_CTRL_C) done = TRUE;
                 
 				if(wait & debug_sigfield)
@@ -544,32 +643,76 @@ void event_loop()
 					//printf("SIG from debug hook\n");
 					//printf("ip = 0x%08x\n", *((int *)debug_hook.h_Data));
 
+					button_set_continue();
+
 					BOOL tracing = FALSE;
 
 					//signal from debugger means TRAP
 					task_playing = FALSE;
 					suspend_all_breakpoints();
-
+					
+					if(stepping_out)
+					{
+						stepping_out = FALSE;
+						stepout_remove();
+					}
 					if (asm_trace)
 					{
 						asmstep_remove();
+						if(!should_continue)
+						{
+							switch(is_branch_allowed())
+							{
+								case DISALLOWEDBRANCH:
+									if(catch_sline)
+									{
+										stepping_out = TRUE;
+										stepout_install();
+										shouldplay = TRUE;
+									}
+									else
+									{
+										//console_printf(OUTPUT_WARNING, "Branch into new area not allowed!");
+										enable(TRUE, GAD_STEPOUT_BUTTON, TAG_END);
+										enable(FALSE, GAD_STEPINTO_BUTTON, GAD_STEPOVER_BUTTON, GAD_DISASSEMBLER_STEP_BUTTON, TAG_END);
+									}
+									catch_sline = FALSE;
+									break;
+								case DISALLOWEDBRANCHCOND:
+									if(catch_sline)
+									{
+										stepping_out = TRUE;
+										stepout_install();
+										shouldplay = TRUE;
+									}
+									else
+									{
+										//console_printf(OUTPUT_WARNING, "Branch into new area not allowed!");
+										enable(TRUE, GAD_STEPOVER_BUTTON, GAD_STEPOUT_BUTTON, TAG_END);
+										enable(FALSE, GAD_STEPINTO_BUTTON, GAD_DISASSEMBLER_STEP_BUTTON, TAG_END);
+									}
+									catch_sline = FALSE;
+									break;
+								default:
+									break;
+							}
+						}			
 						tracing = TRUE;
 						if(!should_continue && !catch_sline)
+						{
 							disassembler_makelist();
+							variables_update();
+							source_update();
+						}
 					}
-					
 					if (should_continue)
 					{
 						install_all_breakpoints();
 						shouldplay = TRUE;
-						//play();
 						should_continue = FALSE;
 					}
 					else
 					{
-
-						//context_ptr->ip = context_copy.ip;
-						
 						current_function = stabs_get_function_from_address (context_copy.ip);
 						dprintf("current_function == 0x%x\n", current_function);
 						if (current_function)
@@ -584,10 +727,15 @@ void event_loop()
 							if (nline != -1)
 							{
 								catch_sline = FALSE;
-								
 								current_function->currentline = nline;
 								//output_lineinfile (current_function->lineinfile[current_function->currentline]);
-								source_update();
+
+							}
+							else if (!catch_sline)
+							{
+								nline = guess_line_in_function();
+								if(nline)
+									current_function->currentline = nline;
 							}
 							else if (!tracing)
 							{
@@ -601,24 +749,27 @@ void event_loop()
 							if(catch_sline)
 							{
 								catch_sline = FALSE;
-								button_setdisabled (StepOverButtonObj, FALSE);
-								button_setdisabled (StepIntoButtonObj, FALSE);
-								IIntuition->SetAttrs(ClickTabObj,
-												CLICKTAB_Labels, ~0,
-												TAG_DONE );
-								IIntuition->SetAttrs(ClickTabObj,
-													CLICKTAB_Current, (uint16)1,
-													CLICKTAB_Labels, PageLabels_1,
-													TAG_END);
+								enable(TRUE, GAD_START_BUTTON, GAD_STEPINTO_BUTTON, GAD_STEPOUT_BUTTON, GAD_DISASSEMBLER_STEP_BUTTON, TAG_END);
+								enable(FALSE, GAD_PAUSE_BUTTON, GAD_STEPOVER_BUTTON, TAG_END);
 							}
+							source_update();
+							variables_update();
+							stacktrace_update();
+							disassembler_makelist();
+							
+							show_disassembler();
 						}
 						else if(!tracing)
-							console_printf(OUTPUT_WARNING, "Program has reached an unknown TRAP");
+						{
+							console_printf(OUTPUT_WARNING, "Program has stopped at an unknown point in memory (TRAP)");
+							disassembler_makelist();
+							show_disassembler();
+						}
 
 						if(catch_sline)
 						{
 							//static int count = 0;
-							//printf("asmstep(%d)\n", count++);
+							//dprintf("asmstep(%d)\n", count++);
 							asmstep();
 						}
 						else if(hasfunctioncontext)
@@ -627,19 +778,18 @@ void event_loop()
 								output_functionheader();
 							old_function = current_function;
 
-							button_setdisabled (StartButtonObj, FALSE);
-							button_setdisabled (PauseButtonObj, TRUE);
-							button_setdisabled (StepOverButtonObj, FALSE);
-							button_setdisabled (StepIntoButtonObj, FALSE);
-							button_setdisabled (KillButtonObj, FALSE);
-							//button_setdisabled (CrashButtonObj, FALSE);
-							button_setdisabled (SelectButtonObj, TRUE);
+							enable(TRUE, GAD_START_BUTTON, GAD_STEPOVER_BUTTON, GAD_STEPINTO_BUTTON, GAD_STEPOUT_BUTTON, GAD_KILL_BUTTON, TAG_END);
+							enable(FALSE, GAD_PAUSE_BUTTON, GAD_SELECT_BUTTON, TAG_END);
 
 							remove_line_breakpoints();
 
-							locals_update();
+							variables_update();
 							stacktrace_update();
 							disassembler_makelist();
+							source_update();
+							
+							if(!tracing)
+								show_source();
 						}
 					}
 				}
@@ -653,25 +803,20 @@ void event_loop()
 					current_function = NULL;
 					breakpoints_installed = FALSE;
 
-					button_setdisabled (StartButtonObj, TRUE);
-					button_setdisabled (PauseButtonObj, TRUE);
-					button_setdisabled (StepOverButtonObj, TRUE);
-					button_setdisabled (StepIntoButtonObj, TRUE);
-					button_setdisabled (KillButtonObj, TRUE);
-					button_setdisabled (CrashButtonObj, TRUE);
-					button_setdisabled (SelectButtonObj, FALSE);
-					button_setdisabled (SetBreakButtonObj, TRUE);
-					button_setdisabled (FilenameStringObj, TRUE);
-					button_setdisabled (HexviewButtonObj, TRUE);
-					button_setdisabled (ReloadButtonObj, FALSE);
-					IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
+					enable(TRUE, GAD_RELOAD_BUTTON, GAD_SELECT_BUTTON, TAG_END);
+					enable(FALSE, GAD_START_BUTTON, GAD_PAUSE_BUTTON, GAD_STEPOVER_BUTTON, GAD_STEPINTO_BUTTON,
+								  GAD_KILL_BUTTON, GAD_SETBREAK_BUTTON, GAD_FILENAME_STRING, GAD_HEX_BUTTON, TAG_END);
+
+					button_set_start();
+					IIntuition->RefreshGadgets ((struct Gadget *)MainObj[GAD_FILENAME_STRING], mainwin, NULL);
 
 					free_symbols();
 					stabs_free_stabs();
 					free_breakpoints();
+					tracking_clear();
 
 					hex_close_window();
-					locals_clear();
+					variables_clear();
 					source_clear();
 					sourcelist_clear();
 					stacktrace_clear();
@@ -730,9 +875,12 @@ void cleanup()
 	main_close_window();
 	arexx_close_port();
 	
-	pipe_cleanup();
+	IExec->FreeSysObject(ASOT_PORT, AppPort);
 	
-	locals_cleanup();
+	pipe_cleanup();
+	tracking_cleanup();
+	
+	variables_cleanup();
 	console_cleanup();
 	stacktrace_cleanup();
 	source_cleanup();
@@ -754,38 +902,28 @@ void main_play()
 	else
 	{
 		install_all_breakpoints();
-
-		button_setdisabled (StartButtonObj, TRUE);
-		button_setdisabled (PauseButtonObj, FALSE);
-		button_setdisabled (StepOverButtonObj, TRUE);
-		button_setdisabled (StepIntoButtonObj, TRUE);		
-		button_setdisabled (KillButtonObj, FALSE);
-		button_setdisabled (CrashButtonObj, TRUE);
-		button_setdisabled (SelectButtonObj, TRUE);
+		
+		enable(TRUE, GAD_PAUSE_BUTTON, GAD_KILL_BUTTON, TAG_END);
+		enable(FALSE, GAD_START_BUTTON, GAD_STEPOVER_BUTTON, GAD_STEPINTO_BUTTON, GAD_STEPOUT_BUTTON, GAD_SELECT_BUTTON, TAG_END);
 
 		should_continue = FALSE;
 		if(!play())
-			button_setdisabled(StartButtonObj, FALSE);
+			enable(TRUE, GAD_START_BUTTON, TAG_END);
 	}
 }
 
 void main_pause()
 {
-	button_setdisabled (StartButtonObj, FALSE);
-	button_setdisabled (PauseButtonObj, TRUE);
-	button_setdisabled (StepOverButtonObj, TRUE);
-	button_setdisabled (StepIntoButtonObj, TRUE);
-
 	pause();
 
-	//registers_update_window();
+	enable(TRUE, GAD_START_BUTTON, TAG_END);
+	enable(FALSE, GAD_PAUSE_BUTTON, TAG_END);
 }
 
 void main_step()
 {
-	button_setdisabled (StepOverButtonObj, TRUE);
-	button_setdisabled (StepIntoButtonObj, TRUE);
-
+	enable(FALSE, GAD_STEPOVER_BUTTON, GAD_STEPINTO_BUTTON, GAD_STEPOUT_BUTTON, TAG_END);
+	
 	if (hasfunctioncontext)
 	{
 		step();
@@ -794,27 +932,26 @@ void main_step()
 
 void main_into()
 {
-	button_setdisabled (StepOverButtonObj, TRUE);
-	button_setdisabled (StepIntoButtonObj, TRUE);
-
+	enable(TRUE, GAD_PAUSE_BUTTON, TAG_END);
+	enable(FALSE, GAD_STEPOVER_BUTTON, GAD_STEPINTO_BUTTON, GAD_STEPOUT_BUTTON, TAG_END);
+	
 	if (1) //hasfunctioncontext)
 	{
 		into();
 	}
 }
 
+void main_out()
+{
+	enable(FALSE, GAD_STEPOVER_BUTTON, GAD_STEPINTO_BUTTON, GAD_STEPOUT_BUTTON, TAG_END);
+	out();
+}
 
 void main_kill()
 {
-	button_setdisabled (StartButtonObj, TRUE);
-	button_setdisabled (PauseButtonObj, TRUE);
-	button_setdisabled (StepOverButtonObj, TRUE);
-	button_setdisabled (StepIntoButtonObj, TRUE);	
-	button_setdisabled (KillButtonObj, TRUE);
-	button_setdisabled (CrashButtonObj, TRUE);
-	button_setdisabled (SelectButtonObj, FALSE);
-	button_setdisabled (FilenameStringObj, TRUE);
-	//IIntuition->RefreshGadgets ((struct Gadget *)FilenameStringObj, mainwin, NULL);
+	enable(TRUE, GAD_SELECT_BUTTON, TAG_END);
+	enable(FALSE, GAD_START_BUTTON, GAD_PAUSE_BUTTON, GAD_STEPOVER_BUTTON, GAD_STEPINTO_BUTTON, GAD_STEPOUT_BUTTON,
+				  GAD_KILL_BUTTON, GAD_FILENAME_STRING, TAG_END);
 
 	killtask();
 
@@ -825,6 +962,8 @@ void main_load(char *name, char *path, char *args)
 {
 	if (!load_inferior (name, path, args))
 	{
+		tracking_clear();		
+		
 		console_printf (OUTPUT_SYSTEM, "New process loaded");
 		init_breakpoints();
 		console_printf(OUTPUT_SYSTEM, "interpreting stabs...");
@@ -833,60 +972,69 @@ void main_load(char *name, char *path, char *args)
 		close_elfhandle(exec_elfhandle);
 		console_printf(OUTPUT_SYSTEM, "Done!");
 
-		button_setdisabled (SelectButtonObj, TRUE);
-		button_setdisabled (StartButtonObj, FALSE);
-		button_setdisabled (KillButtonObj, FALSE);
-		button_setdisabled (CrashButtonObj, TRUE);
-		button_setdisabled (SetBreakButtonObj, FALSE);
-		button_setdisabled (FilenameStringObj, FALSE);
-		button_setdisabled (HexviewButtonObj, FALSE);
-		button_setdisabled (ReloadButtonObj, TRUE);
-		
-		IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
+		enable(TRUE, GAD_START_BUTTON, GAD_KILL_BUTTON, GAD_SETBREAK_BUTTON, GAD_FILENAME_STRING, GAD_HEX_BUTTON, TAG_END);
+		enable(FALSE, GAD_SELECT_BUTTON, GAD_RELOAD_BUTTON, TAG_END);
+		button_set_start();
+
+		IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_FILENAME_STRING], mainwin, NULL,
 														STRINGA_TextVal, name,
 														TAG_DONE);
 		sourcelist_update();
 		sourcelist_show_main();
+		show_source();
 	}
 }
 
-void main_attach(struct Process *pr)
+BOOL main_attach(struct Process *pr)
 {
 	if (!pr)
-		return;
-	if (amigaos_attach(pr))
+		return FALSE;
+
+	if (attach(pr))
 	{
 		console_printf(OUTPUT_SYSTEM, "Attached to process");
 		isattached = TRUE;
 
+		tracking_clear();
 		init_breakpoints();
 
 		stabs_interpret_stabs();
 		close_elfhandle(exec_elfhandle);
 
-		sourcelist_update();
-		source_update();
-
-		button_setdisabled (SelectButtonObj, TRUE);
-		button_setdisabled (StartButtonObj, FALSE);
-		button_setdisabled (KillButtonObj, FALSE);
-		button_setdisabled (CrashButtonObj, TRUE);
-		button_setdisabled (SetBreakButtonObj, FALSE);
-		button_setdisabled (FilenameStringObj, FALSE);
-		button_setdisabled (HexviewButtonObj, FALSE);
-		button_setdisabled (StepOverButtonObj, FALSE);
-		button_setdisabled (StepIntoButtonObj, FALSE);
-		
-		//button_setdisabled (RegisterviewButtonObj, FALSE);
+		enable(TRUE, GAD_START_BUTTON, GAD_KILL_BUTTON, GAD_SETBREAK_BUTTON, GAD_FILENAME_STRING, GAD_HEX_BUTTON, GAD_STEPOVER_BUTTON,
+					 GAD_STEPINTO_BUTTON, TAG_END);
+		enable(FALSE, GAD_SELECT_BUTTON, TAG_END);
 
 										//IIntuition->SetGadgetAttrs((struct Gadget *)FilenameStringObj, mainwin, NULL,
 										//				STRINGA_TextVal, strinfo,
 										//				TAG_DONE);
+		return TRUE;
+	}
+	return FALSE;
+}
+
+void show_about()
+{
+	Object *reqobj;
+
+	reqobj = (Object *)IIntuition->NewObject( IRequester->REQUESTER_GetClass(), NULL,
+            									REQ_Type,       REQTYPE_INFO,
+												REQ_TitleText,  "About",
+									            REQ_BodyText,   "Debug101 v.1.0.0\n © Copyright 2012 by Alfkil Thorbjørn Wennermark\n THANKS TO:\nkas1e and NinjaDNA for testing\nAll the folks on the os4invite list for cooporation and support",
+									            REQ_GadgetText, "Ok",
+									            TAG_END
+        );
+
+	if ( reqobj )
+	{
+		IIntuition->IDoMethod( reqobj, RM_OPENREQ, NULL, mainwin, NULL, TAG_END );
+		IIntuition->DisposeObject( reqobj );
 	}
 }
 
 struct apExecute arexxexecute;
 char arexxcommandstring[1024];
+struct gpInput activemsg;
 
 void main_event_handler()
 {
@@ -907,11 +1055,39 @@ void main_event_handler()
         	case WMHI_CLOSEWINDOW:
             	done = TRUE;
                 break;
+				
+			case WMHI_ICONIFY:
+				if( RA_Iconify(MainWinObj) )
+				mainwin = NULL;
+				break;
 
+			case WMHI_UNICONIFY:
+				mainwin = RA_Uniconify(MainWinObj);
+				if( !mainwin )
+					done = TRUE;
+				break;
+
+			case WMHI_MENUPICK:
+				if (Code != MENUNULL)
+				switch (MENUNUM(Code))
+				{
+					case 0:
+						switch(ITEMNUM(Code))
+						{
+							case 0:
+								show_about();
+								break;
+							case 1:
+								done = TRUE;
+								break;
+						}
+				}
+				break;
+			
             case WMHI_GADGETUP:
             switch(result & WMHI_GADGETMASK)
             {
-				case GAD_FILENAME_BUTTON:
+				case GAD_SELECT_BUTTON:
 
 					strinfo = request_file(mainwin, &path);
 					if (!strinfo)
@@ -923,7 +1099,11 @@ void main_event_handler()
 						strcpy (childpath, path);
 					}
 
-					args = request_arguments();
+					if(!request_arguments(&args))
+					{
+						console_printf(OUTPUT_WARNING, "User aborted!");
+						break;
+					}
 
 					main_load (strinfo, path, args);
 									
@@ -936,8 +1116,23 @@ void main_event_handler()
 									
 				case GAD_ATTACH_BUTTON:
 
-					pr = attach_select_process();
-					main_attach (pr);
+					if(!isattached)
+					{
+						pr = attach_select_process();
+						if(main_attach (pr))
+							button_set_detach();
+					}
+					else
+					{
+						console_printf(OUTPUT_SYSTEM, "Detaching from external process...");
+						detach();
+						button_set_attach();
+						enable(TRUE, GAD_SELECT_BUTTON, TAG_END);
+						enable(FALSE, GAD_START_BUTTON, GAD_PAUSE_BUTTON, GAD_KILL_BUTTON, GAD_STEPOVER_BUTTON,
+										GAD_STEPINTO_BUTTON, GAD_STEPOUT_BUTTON, GAD_SETBREAK_BUTTON, GAD_HEX_BUTTON, TAG_END);
+						console_printf(OUTPUT_SYSTEM, "Done!");
+					}
+						
 					break;
 
 				case GAD_START_BUTTON:
@@ -960,6 +1155,11 @@ void main_event_handler()
 					main_into();
 					break;
 
+				case GAD_STEPOUT_BUTTON:
+				
+					main_out();
+					break;
+
 				case GAD_KILL_BUTTON:
 
 					main_kill();
@@ -977,7 +1177,7 @@ void main_event_handler()
 
 				case GAD_VARIABLES_LISTBROWSER:
 								
-					locals_handle_input();
+					variables_handle_input();
 					break;
 
 				case GAD_SIGNAL_BUTTON:
@@ -1024,7 +1224,7 @@ void main_event_handler()
 				{
 					char *str;
 									
-                    IIntuition->GetAttrs( ArexxStringObj, STRINGA_TextVal, &str, TAG_DONE );
+                    IIntuition->GetAttrs( MainObj[GAD_AREXX_STRING], STRINGA_TextVal, &str, TAG_DONE );
 					strcpy (arexxcommandstring, str);
 
 					arexxexecute.MethodID = AM_EXECUTE;
@@ -1032,12 +1232,14 @@ void main_event_handler()
 					arexxexecute.ape_PortName = "AREXXDB101";
 					arexxexecute.ape_IO = (BPTR)NULL;
 
-                    IIntuition->SetAttrs( ArexxStringObj, STRINGA_TextVal, "", TAG_DONE );
-					IIntuition->RefreshGadgets ((struct Gadget *)ArexxStringObj, mainwin, NULL);
+                    IIntuition->SetAttrs( MainObj[GAD_AREXX_STRING], STRINGA_TextVal, "", TAG_DONE );
+					IIntuition->RefreshGadgets ((struct Gadget *)MainObj[GAD_AREXX_STRING], mainwin, NULL);
 
 					console_printf(OUTPUT_AREXX, arexxcommandstring);
 					IIntuition->IDoMethodA(arexx_obj, (Msg)&arexxexecute);
-
+	
+					//IIntuition->ActivateGadget((struct Gadget *)MainObj[GAD_AREXX_STRING], mainwin, NULL);
+					ILayout->ActivateLayoutGadget((struct Gadget *)MainObj[GAD_TOPLAYOUT], mainwin, NULL, (uint32)MainObj[GAD_AREXX_STRING]);
 					break;
 				}
 			}

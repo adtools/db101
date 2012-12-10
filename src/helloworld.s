@@ -798,32 +798,21 @@ main:
 	lis %r9,.LC8@ha
 	la %r3,.LC8@l(%r9)
 	bl puts
-	.stabn	68,0,82,.LM29-.LFBB3
+	.stabn	68,0,83,.LM29-.LFBB3
 .LM29:
-	lis %r9,IExec@ha
-	lwz %r9,IExec@l(%r9)
-	lwz %r0,296(%r9)
-	mtctr %r0
-	lis %r9,IExec@ha
-	lwz %r0,IExec@l(%r9)
-	mr %r3,%r0
-	li %r4,4096
-	bctrl
-	.stabn	68,0,83,.LM30-.LFBB3
-.LM30:
 	lis %r9,.LC9@ha
 	la %r3,.LC9@l(%r9)
 	bl puts
-	.stabn	68,0,85,.LM31-.LFBB3
-.LM31:
+	.stabn	68,0,85,.LM30-.LFBB3
+.LM30:
 	lis %r9,.LC10@ha
 	la %r3,.LC10@l(%r9)
 	bl puts
-	.stabn	68,0,87,.LM32-.LFBB3
-.LM32:
+	.stabn	68,0,87,.LM31-.LFBB3
+.LM31:
 	li %r0,0
-	.stabn	68,0,88,.LM33-.LFBB3
-.LM33:
+	.stabn	68,0,88,.LM32-.LFBB3
+.LM32:
 	mr %r3,%r0
 	lwz %r11,0(%r1)
 	lwz %r0,4(%r11)

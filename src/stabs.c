@@ -3,10 +3,13 @@
 #include <proto/exec.h>
 #include <proto/elf.h>
 
+#include <libraries/elf.h>
+
 #include "suspend.h"
 #include "stabs.h"
 #include "freemem.h"
 #include "console.h"
+#include "symbols.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -21,7 +24,6 @@
 
 struct List global_symbols;
 struct List sourcefile_list;
-//struct List function_list;
 
 int stabs_freemem_hook = -1;
 
@@ -88,17 +90,17 @@ struct stab_function *stabs_get_function_from_name (char *fname)
 }
 
 
-void stabs_interpret_functions ()
+void stabs_interpret_functions (Elf32_Handle elfhandle)
 {
-	char *stabstr = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stabstr", TAG_DONE);
-	uint32 *stab = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
+	char *stabstr = IElf->GetSectionTags(elfhandle, GST_SectionName, ".stabstr", TAG_DONE);
+	uint32 *stab = IElf->GetSectionTags(elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	if (!stab)
 	{
 		console_printf(OUTPUT_WARNING, "failed to find .stab section...");
 		return;
 	}
 
-	Elf32_Shdr *header = IElf->GetSectionHeaderTags (exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
+	Elf32_Shdr *header = IElf->GetSectionHeaderTags (elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	uint32 stabsize = header->sh_size;
 	struct symtab_entry *sym = (struct symtab_entry *)stab;
 	char *sourcename = NULL;
@@ -119,7 +121,7 @@ void stabs_interpret_functions ()
 			{
 			sourcename = &stabstr[sym->n_strx];
 			if(includelevel > 0)
-				printf("Source file malfunction...\n");
+				console_printf(OUTPUT_WARNING, "Source file malfunction...");
 			soloverride = FALSE;
 			}
 			break;
@@ -144,7 +146,7 @@ void stabs_interpret_functions ()
 		case N_EINCL:
 			{
 			if(includelevel <= 0)
-				printf("Fatal error: negative include level!!!\n");
+				console_printf(OUTPUT_WARNING, "Fatal error: negative include level!!!");
 			includelevel--;
 			}
 			break;
@@ -278,7 +280,7 @@ void stabs_interpret_functions ()
 						break;
 					}
 				}
-				struct stab_sourcefile *s = stabs_get_sourcefile(f->sourcename);
+				struct stab_sourcefile *s = stabs_get_sourcefile(sourcename); //f->sourcenanme
 				if(s)
 					IExec->AddTail(&s->function_list, (struct Node *)f);
 			}
@@ -745,16 +747,16 @@ BOOL str_is_typedef (char *str)
 }
 
 
-void stabs_interpret_typedefs()
+void stabs_interpret_typedefs(Elf32_Handle elfhandle)
 {
-	char *stabstr = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stabstr", TAG_DONE);
-	uint32 *stab = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
+	char *stabstr = IElf->GetSectionTags(elfhandle, GST_SectionName, ".stabstr", TAG_DONE);
+	uint32 *stab = IElf->GetSectionTags(elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	if (!stab || !stabstr)
 		return;
 
-	IExec->NewList (&sourcefile_list);
+	//IExec->NewList (&sourcefile_list);
 
-	Elf32_Shdr *header = IElf->GetSectionHeaderTags (exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
+	Elf32_Shdr *header = IElf->GetSectionHeaderTags (elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	uint32 stabsize = header->sh_size;
 	struct symtab_entry *sym = (struct symtab_entry *)stab;
 	BOOL done = FALSE;
@@ -803,16 +805,16 @@ void stabs_interpret_typedefs()
 	}
 }
 
-void stabs_interpret_globals()
+void stabs_interpret_globals(Elf32_Handle elfhandle)
 {
-	IExec->NewList(&global_symbols);
+	//IExec->NewList(&global_symbols);
 
-	char *stabstr = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stabstr", TAG_DONE);
-	uint32 *stab = IElf->GetSectionTags(exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
+	char *stabstr = IElf->GetSectionTags(elfhandle, GST_SectionName, ".stabstr", TAG_DONE);
+	uint32 *stab = IElf->GetSectionTags(elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	if (!stab)
 		return;
 
-	Elf32_Shdr *header = IElf->GetSectionHeaderTags (exec_elfhandle, GST_SectionName, ".stab", TAG_DONE);
+	Elf32_Shdr *header = IElf->GetSectionHeaderTags (elfhandle, GST_SectionName, ".stab", TAG_DONE);
 	uint32 stabsize = header->sh_size;
 	struct symtab_entry *sym = (struct symtab_entry *)stab;
 	BOOL done = FALSE;
@@ -853,12 +855,38 @@ void stabs_interpret_globals()
 void stabs_interpret_stabs()
 {
 	stabs_freemem_hook = freemem_alloc_hook();
-	stabs_interpret_typedefs();
-	stabs_interpret_functions();
-	stabs_interpret_globals();
+
+	IExec->NewList (&sourcefile_list);
+	IExec->NewList(&global_symbols);
+
+	stabs_interpret_typedefs(exec_elfhandle);
+	stabs_interpret_functions(exec_elfhandle);
+	stabs_interpret_globals(exec_elfhandle);
 }
 
+BOOL stabs_import_external(APTR address)
+{
+	Elf32_Handle elfhandle = IElf->OpenElfTags(OET_MemoryAddr, address, TAG_END);
+	if(!elfhandle)
+	{
+		console_printf(OUTPUT_WARNING, "Failed to open elfhandle for address 0x%x", address);
+		return FALSE;
+	}
+
+	if (amigaos_relocate_elfhandle(elfhandle) == -1)
+	{
+		console_printf(OUTPUT_WARNING, "Failed to relocate elfhandle!");
+		return FALSE;
+	}
+	stabs_interpret_typedefs(elfhandle);
+	stabs_interpret_functions(elfhandle);
+	stabs_interpret_globals(elfhandle);
+	return TRUE;
+}
+	
 void stabs_free_stabs()
 {
 	freemem_free_hook(stabs_freemem_hook);
+	IExec->NewList(&sourcefile_list);
+	IExec->NewList(&global_symbols);
 }

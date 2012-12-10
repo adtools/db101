@@ -14,29 +14,6 @@ Needs at least elf.library 53.13 (currently beta) to work.
 
 ==== KNOWN ISSUES ====
 
-- There is a bug in the os, that prevents setting
-the msr register. Therefore any attempt to set
-a breakpoint on top of a br instruction will
-have unpredictable results. Be warned!
-
-- There is a bug in the gnu linker (dl), that
-throws away a lot of the debug info when compiling
-multiple files into one executable. What this means
-is, that when working on such a project, it is not
-possible to properly read the typedef info, which
-means, that your local and global variables will
-show up as "UNKNOWN". There is currently no fix
-for this, sorry!
-
-- There is no system friendly way to get an
-exception context out of the debug hook. What this
-means is, that when you attach to a process, it is
-not possible to straight away get registers, stack,
-variables etc. before you have manually set up a breakpoint
-and actually hit it. This of course limits the
-usability of the attach function a lot, but there
-is no system friendly way to work around it. Sorry!
-
 - Nested functions is currently not supported.
 
 - Stacktracing is not really functional yet.

@@ -13,7 +13,7 @@
 #include <classes/window.h>
 #include <gadgets/button.h>
 
-#include <graphics/text.h>
+//#include <graphics/text.h>
 
 #include <reaction/reaction_macros.h>
 

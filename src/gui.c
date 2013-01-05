@@ -15,6 +15,7 @@
 #include <proto/clicktab.h>
 #include <proto/arexx.h>
 #include <proto/gadtools.h>
+#include <proto/fuelgauge.h>
 
 #include <classes/window.h>
 #include <classes/requester.h>
@@ -25,6 +26,7 @@
 #include <gadgets/clicktab.h>
 #include <classes/arexx.h>
 #include <gadgets/string.h>
+#include <gadgets/fuelgauge.h>
 
 #include <reaction/reaction_macros.h>
 #include <intuition/classusr.h>
@@ -33,6 +35,7 @@
 #include <interfaces/asl.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
 #include <stdarg.h>
@@ -53,6 +56,12 @@
 #include "console.h"
 #include "pipe.h"
 #include "signalswindow.h"
+#include "importwindow.h"
+#include "preferences.h"
+#include "tracking.h"
+#include "elf.h"
+#include "modules.h"
+#include "progress.h"
 
 #define dprintf(format...)	IExec->DebugPrintF(format)
 
@@ -77,7 +86,7 @@ Object *MainObj[GAD_NUM];
 
 struct MsgPort *AppPort = NULL;
 
-char lastdir[1024] =  "";  //"qt:examples/widgets/calculator"; //work:code/medium/StangTennis2D";  
+char lastdir[1024] =  ""; //"qt:examples/mainwindows/mdi";  //"qt:examples/widgets/calculator"; //work:code/medium/StangTennis2D";  
 char filename[1024] = "";
 char childpath[1024] = "";
 char childfullpath[1024] = "";
@@ -89,9 +98,31 @@ BOOL isattached = FALSE;
 BOOL button_isattach = TRUE;
 extern BOOL catch_sline;
 extern BOOL stepping_out;
+extern BOOL stepping_over;
 extern BOOL has_tracebit;
 
 int main_freemem_hook = -1;
+
+enum //menus
+{
+	MENU_FILE = 0,
+
+	MENU_PREFS = 0,
+	MENU_MODULES,
+	MENU_ABOUT,
+	MENU_QUIT
+};
+
+static struct NewMenu mynewmenu[] =
+{
+    { NM_TITLE, "File", 0, 0, 0, 0},
+    { NM_ITEM, "Preferences...", 0, 0, 0, 0},
+    { NM_ITEM, "Modules...", 0, 0, 0, 0 },
+   	{ NM_ITEM, "About...", 0, 0, 0, 0 },
+   	{ NM_ITEM, "Quit", 0, 0, 0 },
+   	{ NM_END, NULL, 0, 0, 0, 0}
+};
+    
 
 char *request_file (struct Window *win, char **path)
 {
@@ -113,10 +144,6 @@ char *request_file (struct Window *win, char **path)
 
 	ret = (char *)freemem_malloc(main_freemem_hook, 1024);
 	*path = (char *)freemem_malloc(main_freemem_hook, 1024);
-
-//	if (strlen(req->fr_Drawer) > 0)
-//		sprintf (ret, "%s/%s", req->fr_Drawer, req->fr_File);
-//	else
 
 	strcpy (ret, req->fr_File);
 	if (!strlen(req->fr_Drawer))
@@ -263,6 +290,7 @@ uint32 obtain_all_signals()
 	signal |= arexx_obtain_signal();
 	signal |= pipe_obtain_signal();
 	signal |= sigwin_obtain_signal();
+	signal |= import_obtain_window_signal();
 	signal |= debug_sigfield;
 
    if( AppPort )
@@ -277,6 +305,10 @@ void main_open_window()
 {
 	main_freemem_hook = freemem_alloc_hook();
 
+	char *initdir = getenv("DB101_LASTDIR");
+	if(initdir)
+		strcpy(lastdir, initdir);
+
 	variables_init();
 	console_init();
 	stacktrace_init();
@@ -284,23 +316,14 @@ void main_open_window()
 	disassembler_init();
 	sourcelist_init();
 	
-	tracking_init();
 	pipe_init();
-	
-	static struct NewMenu mynewmenu[] =
-	{
-	    { NM_TITLE, "File", 0, 0, 0, 0},
-    	{ NM_ITEM, "About...", 0, 0, 0, 0 },
-    	{ NM_ITEM, "Quit", 0, 0, 0 },
-    	{ NM_END, NULL, 0, 0, 0, 0}
-    };
 
    AppPort = IExec->AllocSysObjectTags(ASOT_PORT, TAG_DONE);
 
     /* Create the window object. */
     if(( MainWinObj = WindowObject,
             WA_ScreenTitle, "Debug 101",
-            WA_Title, "Debug 101 v1.0.0",
+            WA_Title, "Debug 101 v1.1.0 BETA - secret edition ;)",
             WA_Width, 1024,
 			WA_Height, 768,
             WA_DepthGadget, TRUE,
@@ -525,15 +548,24 @@ void main_open_window()
 					EndMember,
 					
 					LAYOUT_WeightBar,	TRUE,
-					LAYOUT_AddChild, MainObj[GAD_SOURCELIST_LISTBROWSER] = ListBrowserObject,
-						GA_ID,                     GAD_SOURCELIST_LISTBROWSER,
-	    		    	GA_RelVerify,              TRUE,
-	        		    GA_TabCycle,               TRUE,
-						LISTBROWSER_AutoFit,       TRUE,
-	        	    	LISTBROWSER_Labels,        &sourcelist_list,
-	        	  		LISTBROWSER_ShowSelected,  TRUE,
-	        	        LISTBROWSER_Striping,      LBS_ROWS,
-					ListBrowserEnd,
+					LAYOUT_AddChild, VLayoutObject,
+						LAYOUT_AddChild, MainObj[GAD_SOURCELIST_LISTBROWSER] = ListBrowserObject,
+							GA_ID,                     GAD_SOURCELIST_LISTBROWSER,
+	    		    		GA_RelVerify,              TRUE,
+	        		    	GA_TabCycle,               TRUE,
+							LISTBROWSER_AutoFit,       TRUE,
+	        	    		LISTBROWSER_Labels,        &sourcelist_list,
+	        	  			LISTBROWSER_ShowSelected,  TRUE,
+	        	        	LISTBROWSER_Striping,      LBS_ROWS,
+						ListBrowserEnd,
+						
+						LAYOUT_AddChild, MainObj[GAD_IMPORT_BUTTON] = ButtonObject,
+							GA_ID, GAD_IMPORT_BUTTON,
+							GA_RelVerify, TRUE,
+							GA_Text, "Import externals",
+						ButtonEnd,
+						CHILD_WeightedHeight, 0,
+					EndMember,
 					CHILD_WeightedWidth,		20,
 				EndMember,
 				
@@ -601,7 +633,6 @@ void main_open_window()
 }
 
 BOOL done = FALSE;
-//#define    MSR_TRACE_ENABLE           0x00000400
 
 void show_disassembler()
 {
@@ -619,8 +650,10 @@ void show_source()
 	IIntuition->IDoMethod(MainWinObj, WM_RETHINK);
 }
 
+extern struct stab_function *stepover_func;
+
 void event_loop()
-{	
+{
             ULONG wait, signal;
 			BOOL shouldplay = FALSE;
 			char *symbol = NULL;
@@ -640,10 +673,19 @@ void event_loop()
                 
 				if(wait & debug_sigfield)
 				{
-					//printf("SIG from debug hook\n");
-					//printf("ip = 0x%08x\n", *((int *)debug_hook.h_Data));
+					//console_printf(OUTPUT_SYSTEM, "SIG from debug hook\n");
+					//console_printf(OUTPUT_SYSTEM, "traptype = 0x%08x\n", *((uint32 *)debug_hook.h_Data));
 
 					button_set_continue();
+
+					BOOL crashed = FALSE;
+					uint32 traptype = *((uint32 *)debug_hook.h_Data);
+					if(traptype != 0x700 && traptype != 0xd00)
+					{
+						catch_sline = FALSE;
+						should_continue = FALSE;
+						console_printf(OUTPUT_WARNING, "Your program has crashed! ip = 0x%x", context_copy.ip);
+					}
 
 					BOOL tracing = FALSE;
 
@@ -659,7 +701,7 @@ void event_loop()
 					if (asm_trace)
 					{
 						asmstep_remove();
-						if(!should_continue)
+						if(!should_continue && !stepping_over)
 						{
 							switch(is_branch_allowed())
 							{
@@ -677,6 +719,7 @@ void event_loop()
 										enable(FALSE, GAD_STEPINTO_BUTTON, GAD_STEPOVER_BUTTON, GAD_DISASSEMBLER_STEP_BUTTON, TAG_END);
 									}
 									catch_sline = FALSE;
+									stepping_over = FALSE;
 									break;
 								case DISALLOWEDBRANCHCOND:
 									if(catch_sline)
@@ -692,6 +735,7 @@ void event_loop()
 										enable(FALSE, GAD_STEPINTO_BUTTON, GAD_DISASSEMBLER_STEP_BUTTON, TAG_END);
 									}
 									catch_sline = FALSE;
+									stepping_over = FALSE;
 									break;
 								default:
 									break;
@@ -714,22 +758,44 @@ void event_loop()
 					else
 					{
 						current_function = stabs_get_function_from_address (context_copy.ip);
-						dprintf("current_function == 0x%x\n", current_function);
 						if (current_function)
 							hasfunctioncontext = TRUE;
+						else if(!stepping_over && try_import_segment(context_copy.ip) > 0)
+						{
+							current_function = stabs_get_function_from_address(context_copy.ip);
+							if(current_function)
+								hasfunctioncontext = TRUE;
+							else
+								hasfunctioncontext = FALSE;
+						}
 						else
 							hasfunctioncontext = FALSE;
 							
 						if (hasfunctioncontext)
 						{
+							//dprintf("current_function == %s\n", current_function->name);
+							//if(stepover_func)
+							//	dprintf("stepover_func == %s\n", stepover_func->name);
+							
 							int nline = get_nline_from_address (context_copy.ip);
-
-							if (nline != -1)
+							
+							if(nline >= 0)
 							{
-								catch_sline = FALSE;
-								current_function->currentline = nline;
-								//output_lineinfile (current_function->lineinfile[current_function->currentline]);
-
+								if(stepping_over)
+								{
+									if(current_function == stepover_func
+										&& current_function->line[nline].infile != current_function->line[current_function->currentline].infile)
+									{
+										catch_sline = FALSE;
+										stepping_over = FALSE;
+										current_function->currentline = nline;
+									}
+								}
+								else
+								{
+									catch_sline = FALSE;
+									current_function->currentline = nline;
+								}
 							}
 							else if (!catch_sline)
 							{
@@ -743,9 +809,9 @@ void event_loop()
 								//printf("function size: 0x%x function address: 0x%x\n", current_function->size, current_function->address);
 							}
 						}
-						else if(symbol = get_symbol_from_value(context_copy.ip))
+						else if(!stepping_over && (symbol = get_symbol_from_value(context_copy.ip)))
 						{
-							console_printf(OUTPUT_NORMAL, "At symbol %s", symbol);
+							console_printf(OUTPUT_NORMAL, "At symbol %s: 0x%x", symbol, context_copy.ip);
 							if(catch_sline)
 							{
 								catch_sline = FALSE;
@@ -759,18 +825,21 @@ void event_loop()
 							
 							show_disassembler();
 						}
-						else if(!tracing)
+						else if(!stepping_over && !tracing)
 						{
 							console_printf(OUTPUT_WARNING, "Program has stopped at an unknown point in memory (TRAP)");
 							disassembler_makelist();
+							variables_update();
+							stacktrace_update();
 							show_disassembler();
 						}
 
 						if(catch_sline)
 						{
-							//static int count = 0;
-							//dprintf("asmstep(%d)\n", count++);
-							asmstep();
+							if(stepping_over && get_branched_function() != current_function)
+								asmstep_nobranch();
+							else
+								asmstep();
 						}
 						else if(hasfunctioncontext)
 						{
@@ -810,11 +879,13 @@ void event_loop()
 					button_set_start();
 					IIntuition->RefreshGadgets ((struct Gadget *)MainObj[GAD_FILENAME_STRING], mainwin, NULL);
 
+					close_all_elfhandles();
 					free_symbols();
 					stabs_free_stabs();
 					free_breakpoints();
-					tracking_clear();
+					//tracking_clear();
 
+					modules_close_window();
 					hex_close_window();
 					variables_clear();
 					source_clear();
@@ -840,6 +911,10 @@ void event_loop()
 				if (wait & sigwin_obtain_signal())
 				{
 					sigwin_event_handler();
+				}
+				if(wait & import_obtain_window_signal())
+				{
+					import_event_handler();
 				}
 				if(wait & arexx_obtain_signal())
 				{
@@ -868,17 +943,18 @@ void cleanup()
 		killtask();
 
 	free_symbols();
+	close_all_elfhandles();
 	stabs_free_stabs();
 
 	hex_close_window();
 	breakpoints_close_window();
+	modules_close_window();
 	main_close_window();
 	arexx_close_port();
 	
 	IExec->FreeSysObject(ASOT_PORT, AppPort);
 	
 	pipe_cleanup();
-	tracking_cleanup();
 	
 	variables_cleanup();
 	console_cleanup();
@@ -888,6 +964,10 @@ void cleanup()
 	sourcelist_cleanup();
 	
 	freemem_free_hook(main_freemem_hook);
+
+	char sysstring[1024] = "";	
+	sprintf(sysstring, "setenv DB101_LASTDIR SAVE \"%s\"", lastdir);
+	IDOS->SystemTags(sysstring, TAG_END);
 }
 
 void main_play()
@@ -962,15 +1042,16 @@ void main_load(char *name, char *path, char *args)
 {
 	if (!load_inferior (name, path, args))
 	{
-		tracking_clear();		
-		
 		console_printf (OUTPUT_SYSTEM, "New process loaded");
 		init_breakpoints();
-		console_printf(OUTPUT_SYSTEM, "interpreting stabs...");
-		get_symbols();
-		stabs_interpret_stabs();
-		close_elfhandle(exec_elfhandle);
+		console_printf(OUTPUT_SYSTEM, "Interpreting stabs...");
+		stabs_init();
+		init_symbols();
+		if(!stabs_load_module(exec_elfhandle, name))
+			console_printf(OUTPUT_WARNING, "Failed to load stabs section for %s", name);
 		console_printf(OUTPUT_SYSTEM, "Done!");
+		if(!modules_lookup_entry(name))
+			modules_add_entry(name, path, TRUE);
 
 		enable(TRUE, GAD_START_BUTTON, GAD_KILL_BUTTON, GAD_SETBREAK_BUTTON, GAD_FILENAME_STRING, GAD_HEX_BUTTON, TAG_END);
 		enable(FALSE, GAD_SELECT_BUTTON, GAD_RELOAD_BUTTON, TAG_END);
@@ -980,7 +1061,8 @@ void main_load(char *name, char *path, char *args)
 														STRINGA_TextVal, name,
 														TAG_DONE);
 		sourcelist_update();
-		sourcelist_show_main();
+		if(db101_prefs.prefs_show_main_at_entry)
+			sourcelist_show_main();
 		show_source();
 	}
 }
@@ -995,11 +1077,12 @@ BOOL main_attach(struct Process *pr)
 		console_printf(OUTPUT_SYSTEM, "Attached to process");
 		isattached = TRUE;
 
-		tracking_clear();
+		//tracking_clear();
 		init_breakpoints();
 
-		stabs_interpret_stabs();
-		close_elfhandle(exec_elfhandle);
+		stabs_init();
+		stabs_load_module(exec_elfhandle, "(attached)");
+		modules_add_entry("(attached)", "", TRUE);
 
 		enable(TRUE, GAD_START_BUTTON, GAD_KILL_BUTTON, GAD_SETBREAK_BUTTON, GAD_FILENAME_STRING, GAD_HEX_BUTTON, GAD_STEPOVER_BUTTON,
 					 GAD_STEPINTO_BUTTON, TAG_END);
@@ -1039,7 +1122,7 @@ struct gpInput activemsg;
 void main_event_handler()
 {
 	ULONG result;
-    WORD Code;
+    UWORD Code;
     static char *strinfo, *args;
 	static char *path;
 	int line=0;
@@ -1071,13 +1154,19 @@ void main_event_handler()
 				if (Code != MENUNULL)
 				switch (MENUNUM(Code))
 				{
-					case 0:
+					case MENU_FILE:
 						switch(ITEMNUM(Code))
 						{
-							case 0:
+							case MENU_PREFS:
+								preferences_open_window();
+								break;
+							case MENU_MODULES:
+								modules_open_window();
+								break;
+							case MENU_ABOUT:
 								show_about();
 								break;
-							case 1:
+							case MENU_QUIT:
 								done = TRUE;
 								break;
 						}
@@ -1126,6 +1215,7 @@ void main_event_handler()
 					{
 						console_printf(OUTPUT_SYSTEM, "Detaching from external process...");
 						detach();
+						stabs_free_stabs();
 						button_set_attach();
 						enable(TRUE, GAD_SELECT_BUTTON, TAG_END);
 						enable(FALSE, GAD_START_BUTTON, GAD_PAUSE_BUTTON, GAD_KILL_BUTTON, GAD_STEPOVER_BUTTON,
@@ -1183,6 +1273,11 @@ void main_event_handler()
 				case GAD_SIGNAL_BUTTON:
 				
 					sigwin_open_window();
+					break;
+
+				case GAD_IMPORT_BUTTON:
+				
+					import_open_window();
 					break;
 
 				case GAD_X_BUTTON:

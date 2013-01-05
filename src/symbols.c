@@ -37,6 +37,7 @@
 #include "symbols.h"
 #include "freemem.h"
 #include "console.h"
+#include "elf.h"
 
 struct List symbols_list;
 BOOL has_symbols = FALSE;
@@ -63,49 +64,26 @@ ULONG amigaos_symbol_callback(struct Hook *hook, struct Task *task, struct Symbo
 	return 1;
 }
 
-Elf32_Handle open_elfhandle(BPTR seglist)
-{
-	Elf32_Handle elfhandle;
-    IDOS->GetSegListInfoTags(seglist, 
-							 GSLI_ElfHandle,      &elfhandle,
-							 TAG_DONE);
-
-	if(elfhandle == NULL)
-	{
-		console_printf (OUTPUT_WARNING, "not a PowerPC executable");
-		return (0);
-    }
-
-    elfhandle = IElf->OpenElfTags(OET_ElfHandle, elfhandle, TAG_DONE);
-
-	if (elfhandle == NULL)
-	{
-		console_printf (OUTPUT_WARNING, "couldn't open elfhandle");
-		return (0);
-   	}
-	return elfhandle;
-}
-
-void close_elfhandle (Elf32_Handle handle)
-{
-	IElf->CloseElfTags (handle, CET_CloseInput, TRUE, TAG_DONE);
-}
-
-
-void get_symbols ()
+void init_symbols()
 {
 	if (has_symbols)
 		free_symbols();
 	IExec->NewList (&symbols_list);
-
+	
+	if(symbols_freemem_hook != -1)
+		freemem_free_hook(symbols_freemem_hook);
 	symbols_freemem_hook = freemem_alloc_hook();
+}
 
+void get_symbols (Elf32_Handle elfhandle)
+{
     symbol_hook.h_Entry = (ULONG (*)())amigaos_symbol_callback;
     symbol_hook.h_Data =  NULL;
 
-	//printf("calling ScanSymbolTable...\n");
-	IElf->ScanSymbolTable (exec_elfhandle, &symbol_hook, NULL);
-	//printf("done!\n");
+	//elf should be open by now
+	//Elf32_Handle handle = open_elfhandle(elfhandle);
+
+	IElf->ScanSymbolTable (elfhandle, &symbol_hook, NULL);
 
 	has_symbols = TRUE;
 }
@@ -119,13 +97,6 @@ void free_symbols ()
 		freemem_free_hook(symbols_freemem_hook);
 	IExec->NewList(&symbols_list);
 	has_symbols = FALSE;
-}
-
-void list_symbols ()
-{
-//	int i;
-//	for ( i = 0; i < nosymbols; i++)
-//		printf (" \"%s\" = 0x%x\n", symlist[i], symval[i]);
 }
 
 uint32 get_symval_from_name (char *name)
@@ -154,4 +125,17 @@ char *get_symbol_from_value(uint32 val)
 		s = (struct amigaos_symbol *)IExec->GetSucc((struct Node *)s);
 	}
 	return NULL;
+}
+
+void symbols_dummy(Elf32_Handle elfhandle)
+{
+	struct Elf32_SymbolQuery query;
+	STRPTR tempbuffer = "(dummy)";
+    
+	query.Flags      = ELF32_SQ_BYNAME | ELF32_SQ_LOAD;
+	query.Name       = tempbuffer;
+	query.NameLength = strlen(tempbuffer);
+	query.Value      = 0;
+
+	uint32 queryres = IElf->SymbolQuery(elfhandle, 1, &query);
 }

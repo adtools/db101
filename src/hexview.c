@@ -6,6 +6,7 @@
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <proto/intuition.h>
+#include <proto/graphics.h>
 #include <proto/window.h>
 #include <proto/button.h>
 #include <proto/string.h>
@@ -16,6 +17,7 @@
 #include <proto/elf.h>
 #include <proto/chooser.h>
 #include <proto/string.h>
+#include <proto/diskfont.h>
 
 #include <classes/window.h>
 #include <gadgets/button.h>
@@ -39,6 +41,8 @@
 #include "symbols.h"
 #include "hexview.h"
 #include "freemem.h"
+#include "elf.h"
+#include "preferences.h"
 
 enum
 {
@@ -70,7 +74,7 @@ struct TextAttr courier_font =
 	FS_NORMAL,
 	0x01
 };
-
+struct TextFont *font = NULL;
 
 
 void interpret_chars (char *src, char *dest, int size)
@@ -95,7 +99,7 @@ void hex_init_section_list ()
 	char *name, *strtable;
 	struct Node *node;
 
-	Elf32_Handle elfhandle = open_elfhandle(exec_seglist);
+	Elf32_Handle elfhandle = open_elfhandle(exec_elfhandle);
 	if (!elfhandle)
 		return;
 
@@ -183,10 +187,10 @@ void hex_read_section(uint32 *section, uint32 size)
 
 void hex_load_section (int index)
 {
-	Elf32_Handle elfhandle = open_elfhandle(exec_seglist);
+	Elf32_Handle elfhandle = open_elfhandle(exec_elfhandle);
 	if (!elfhandle)
 		return;
-
+	
 	uint32 *section = IElf->GetSectionTags(elfhandle, GST_SectionIndex, index, TAG_DONE);
 	Elf32_Shdr *header = IElf->GetSectionHeaderTags (elfhandle, GST_SectionIndex, index, TAG_DONE);
 	if (!section)
@@ -203,11 +207,6 @@ void hex_load_section (int index)
 	close_elfhandle(elfhandle);
 }
 
-void hex_free_section()
-{
-	//freelist(&hex_freelist);
-}
-
 
 void hex_open_window()
 {
@@ -220,11 +219,13 @@ void hex_open_window()
 	IExec->NewList (&hexlist);
 	hex_freemem_hook = freemem_alloc_hook();
 
+	font = IDiskfont->OpenDiskFont(&courier_font);
+
 	hex_init_section_list ();
 
     /* Create the window object. */
     if(( HexWinObj = WindowObject,
-            WA_ScreenTitle, "DEbug 101",
+            WA_ScreenTitle, "Debug 101",
             WA_Title, "Hex Viewer",
             WA_Width, 750,
 			WA_Height, 400,
@@ -323,9 +324,9 @@ uint32 hex_obtain_window_signal()
 
 void hex_event_handler()
 {
-            ULONG wait, signal, result, done = FALSE;
+            ULONG result, done = FALSE;
             WORD Code;
-            CONST_STRPTR hintinfo;
+            //CONST_STRPTR hintinfo;
 			uint32 selected;
             
             /* Obtain the window wait signal mask. */
@@ -388,6 +389,7 @@ void hex_close_window()
         IIntuition->DisposeObject( HexWinObj );
 		IListBrowser->FreeListBrowserList(&hexlist);
 		freemem_free_hook(hex_freemem_hook);
+		IGraphics->CloseFont(font);
 
 		hex_window_is_open = FALSE;
     }

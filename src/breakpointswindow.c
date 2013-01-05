@@ -12,7 +12,6 @@
 #include <proto/layout.h>
 #include <proto/label.h>
 #include <proto/listbrowser.h>
-//#include <proto/asl.h>
 #include <proto/elf.h>
 #include <proto/space.h>
 
@@ -24,9 +23,6 @@
 #include <gadgets/string.h>
 
 #include <reaction/reaction_macros.h>
-
-//#include <libraries/asl.h>
-//#include <interfaces/asl.h>
 
 #include <libraries/elf.h>
 
@@ -71,7 +67,6 @@ void breakpoints_makebplist()
         IListBrowser->FreeListBrowserList(&bp_breakpointslist);
 	IExec->NewList(&bp_breakpointslist);
 
-    IExec->NewList (&bp_breakpointslist);
 	struct breakpoint *br = (struct breakpoint *)IExec->GetHead(&breakpoint_list);
 	int i = 0;
 	while(br)
@@ -120,11 +115,14 @@ void breakpoints_makesymbollist()
 	while(sym)
 	{
 		struct Node *node;
-        if (node = IListBrowser->AllocListBrowserNode(1,
+        if (node = IListBrowser->AllocListBrowserNode(2,
         										LBNA_UserData, sym,
                                                 LBNA_Column, 0,
                                                 	LBNCA_CopyText, TRUE,
                                                 	LBNCA_Text, sym->name,
+                                                LBNA_Column, 1,
+                                                	LBNCA_Integer,	&sym->value,
+                                                	LBNCA_Justification,	LCJ_RIGHT,
                                                 TAG_DONE))
                                     {
                                         IExec->AddTail(&bp_symbolslist, node);
@@ -137,6 +135,7 @@ void breakpoints_makesymbollist()
 }
 
 #define SPACE LAYOUT_AddChild, SpaceObject, End
+struct ColumnInfo *bpwin_ci;
 
 void breakpoints_open_window()
 {
@@ -145,6 +144,21 @@ void breakpoints_open_window()
 
 	IExec->NewList(&bp_breakpointslist);
 	IExec->NewList(&bp_symbolslist);
+
+	bpwin_ci = IListBrowser->AllocLBColumnInfo( 2,
+		LBCIA_Column,	0,
+			LBCIA_Title, "Symbol",
+			LBCIA_Width,	100,
+			LBCIA_AutoSort,	TRUE,
+			LBCIA_DraggableSeparator, TRUE,
+			LBCIA_SortArrow, TRUE,
+		LBCIA_Column,	1,
+			LBCIA_Title,	"Value",
+			LBCIA_AutoSort, TRUE,
+			LBCIA_DraggableSeparator, TRUE,
+			LBCIA_SortArrow, TRUE,
+		TAG_DONE);
+	
    
     /* Create the window object. */
     if(( BPWinObj = WindowObject,
@@ -171,6 +185,10 @@ void breakpoints_open_window()
                     	GA_ID,                     BP_SYMBOLS_LISTBROWSER,
                     	GA_RelVerify,              TRUE,
                     	GA_TabCycle,               TRUE,
+                    	LISTBROWSER_ColumnInfo,		bpwin_ci,
+                    	LISTBROWSER_ColumnTitles,	TRUE,
+                    	LISTBROWSER_TitleClickable,	TRUE,
+                    	LISTBROWSER_Separators,		TRUE,
                     	LISTBROWSER_AutoFit,       TRUE,
                     	LISTBROWSER_Labels,        &bp_symbolslist,
 	                    LISTBROWSER_ShowSelected,  TRUE,
@@ -269,7 +287,7 @@ uint32 breakpoints_obtain_window_signal()
 
 void breakpoints_event_handler()
 {
-    ULONG wait, signal, result, relevent;
+    ULONG result;
     BOOL done = FALSE;
     WORD Code;
     CONST_STRPTR hintinfo;
@@ -350,11 +368,6 @@ void breakpoints_close_window()
 {
     if (breakpointswin)
     {
-        /* Disposing of the window object will
-         * also close the window if it is
-         * already opened and it will dispose of
-         * all objects attached to it.
-         */
         IIntuition->DisposeObject( BPWinObj );
 	    if (!IsListEmpty(&bp_breakpointslist))
     	    IListBrowser->FreeListBrowserList(&bp_breakpointslist);

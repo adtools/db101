@@ -14,6 +14,11 @@ void main_kill(void);
 void main_load(char *, char *, char *);
 BOOL main_attach(struct Process *);
 
+void open_progress(char *, int, int);
+void update_progress(char *, int, int);
+void update_progress_val(int);
+void close_progress();
+
 void event_loop(void);
 void cleanup(void);
 
@@ -46,6 +51,7 @@ enum
 	GAD_DISASSEMBLER_STEP_BUTTON,
 	GAD_DISASSEMBLER_SKIP_BUTTON,
 	GAD_SOURCELIST_LISTBROWSER,
+	GAD_IMPORT_BUTTON,
 	GAD_CONSOLE_LISTBROWSER,
 	GAD_AREXX_STRING,
 	GAD_AREXX_BUTTON,

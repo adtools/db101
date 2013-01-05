@@ -52,22 +52,5 @@ enum __breakpoint_type
 	BR_TRACE
 };
 
-typedef enum
-{
-	NOBRANCH,
-	NORMALBRANCH,
-	NORMALBRANCHCOND,
-	ALLOWEDBRANCH,
-	ALLOWEDBRANCHCOND,
-	DISALLOWEDBRANCH,
-	DISALLOWEDBRANCHCOND
-} branch;
-
-branch is_branch_allowed(void);
-
 extern struct List breakpoint_list;
 extern BOOL breakpoints_installed;
-
-void tracking_init();
-void tracking_cleanup();
-void tracking_clear();

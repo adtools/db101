@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 
-//#include "helloworld3.c"
+#include "helloworld3.c"
 
 typedef unsigned int mytype;
 //typedef char *ptrtype;
@@ -70,6 +70,14 @@ int main()
 	a = hello(5);
 
 	globalvariable = 4321;
+
+	if(dfloat > 1.0)
+	{
+		printf("dfloat is a very large number\n");
+		dfloat = 1.0;
+	}
+	
+	helloworld3();
 
 	for (; a < 15; a++)
 	{

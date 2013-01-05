@@ -7,24 +7,21 @@
 #include <libraries/elf.h>
 #include <dos/dos.h>
 
-extern char * stabs_get_function_for_address (uint32);
-
 struct stab_function
 {
 	struct Node node;
 	char *name;
 	uint32 address;
 	uint32 size;
-	char *sourcename;
+	//char *sourcename;
+	struct stab_sourcefile *sourcefile;
 	uint32 numberoflines;
 	struct sline {
 		uint32 adr;      //list of addresses relative to funtion address
 		uint32 infile;
 		uint32 type;
+		char *solname;
 	} *line;
-	//uint32 lines[1024];      //list of addresses relative to funtion address
-	//uint32 lineinfile[1024];
-	//uint32 linetype[1024];
 	uint32 currentline;
 	struct List symbols;
 	struct List params;
@@ -123,37 +120,58 @@ struct stab_typedef
 	struct stab_enum *enum_ptr; //for enums
 };
 
+struct stab_module
+{
+	struct Node node;
+	char *name;
+	char *sourcepath;
+	Elf32_Handle elfhandle;
+	BOOL elfhasbeenopened;
+	BOOL globalshasbeenloaded;
+	uint32 startoffset;
+	uint32 endoffset;
+	struct List sourcefiles; //list of stab_sourcefile objects
+	struct List globals;
+};
+
 struct stab_sourcefile
 {
 	struct Node node;
 	char *filename;
+	struct stab_module *module;
+	BOOL hasbeeninterpreted;
+	uint32 stabsoffset;
+	uint32 startoffset;
+	uint32 endoffset;
 	struct List function_list;
 	struct List typedef_list;
 	struct List unknown_list; //for unknown pointer types
 };
 
 
+
 extern struct stab_function *stabs_get_function_from_address (uint32);
 extern struct stab_function *stabs_get_function_from_name (char *);
-struct stab_function *stabs_sline_to_nline(char *, uint32, uint32 *);
+struct stab_function *stabs_sline_to_nline(struct stab_sourcefile *, uint32, uint32 *, char *);
 struct stab_sourcefile *stabs_get_sourcefile(char *);
+struct stab_module *stabs_get_module(char *);
 
-void stabs_interpret_functions(Elf32_Handle);
-void stabs_interpret_typedefs(Elf32_Handle);
-void stabs_interpret_globals(Elf32_Handle);
-void stabs_interpret_stabs(void);
+void stabs_interpret_globals(struct List *, char *, uint32 *, uint32);
+uint32 stabs_interpret_sourcefile(struct stab_sourcefile *, char *, uint32 *, uint32);
 
-BOOL stabs_import_external(APTR);
+BOOL stabs_load_sourcefile(struct stab_sourcefile *);
+BOOL stabs_load_module(Elf32_Handle, char *);
 void stabs_free_stabs(void);
 
-extern char *stabs_strdup_strip(char *);
+void stabs_init();
+
+char *stabs_strdup_strip(char *);
 char *skip_in_string (char *, char *);
+char *strdup_until(char *, char);
 
-struct stab_typedef * stabs_get_type_from_string (char *, char *);
+struct stab_typedef * stabs_get_type_from_string (char *, struct stab_sourcefile *);
 
-extern struct List global_symbols;
-extern struct List function_list;
-extern struct List sourcefile_list;
+extern struct List modules_list;
 
 struct symtab_entry {
 	unsigned long n_strx;

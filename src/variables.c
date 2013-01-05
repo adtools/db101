@@ -511,6 +511,9 @@ void params_populate_list(struct Node *node)
 
 void locals_populate_list(struct Node *node)
 {
+	if(!current_function)
+		return;
+		
     struct Node *n = node;
 
     struct List *l = &(current_function->symbols);
@@ -532,17 +535,22 @@ void globals_populate_list(struct Node *node)
 {
     struct Node *n = node;
 
-    struct List *l = &global_symbols;
-    struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
-
 	IIntuition->SetAttrs(MainObj[GAD_VARIABLES_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
-    while (s)
-    {
-    	n = variables_add_children(n, s, 1, FALSE); //not hidden
-        s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
-    }
+
+	struct stab_module *m = (struct stab_module *)IExec->GetHead(&modules_list);
+	while(m)
+	{
+	    struct List *l = &m->globals;
+	    struct stab_symbol *s = (struct stab_symbol *)IExec->GetHead (l);
+
+	    while (s)
+	    {
+	    	n = variables_add_children(n, s, 1, FALSE); //not hidden
+	        s = (struct stab_symbol *)IExec->GetSucc((struct Node *)s);
+	    }
+	    m = (struct stab_module *)IExec->GetSucc((struct Node *)m);
+	}
 	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_VARIABLES_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &variable_list, TAG_END);
-	
 	globals_list_populated = 1;
 }
 
@@ -765,7 +773,7 @@ void update_variables()
 	
 void variables_update()
 {
-	if(current_function != variables_shown_function)
+	if(current_function != variables_shown_function || current_function == NULL)
 	{
 		//if function has changed:
 		variables_clear();

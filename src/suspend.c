@@ -36,6 +36,8 @@
 #include "console.h"
 #include "pipe.h"
 #include "setbreak.h"
+#include "elf.h"
+#include "preferences.h"
 
 #define dprintf(format...)	IExec->DebugPrintF(format)
 
@@ -79,7 +81,10 @@ BOOL task_playing = FALSE;
 BOOL wants_to_crash = FALSE;
 BOOL should_continue = FALSE;
 BOOL catch_sline = FALSE;
+BOOL stepping_over = FALSE;
 BOOL stepping_out = FALSE;
+
+struct stab_function *stepover_func = NULL;
 
 void init()
 {
@@ -129,118 +134,6 @@ void remove_hook()
 		IDebug->AddDebugHook((struct Task*)process, NULL);
 }
 
-
-int amigaos_relocate_elfhandle (Elf32_Handle elfhandle)
-{
-    Elf32_Handle hElf = elfhandle;
-    Elf32_Shdr *pHeader;
-    int i;
-    uint32 nSecs;
-    uint32 strtblidx; /* for debugging */
-    char *strtbl; /* for debugging */
-
-    struct TagItem tags[] =
-		{
-			{GST_SectionIndex,     0},
-			{GST_Load,             TRUE},
-			{TAG_DONE,             0}
-		};
-
-    /* Get number of sections in ELF file and the string
-     * table index. The latter is used only for debugging
-     * purposes. */
-    if ((2 != IElf->GetElfAttrsTags(hElf,
-    		EAT_NumSections, &nSecs,
-    		EAT_SectionStringTable, &strtblidx,
-    		TAG_DONE)))
-    {
-    	console_printf(OUTPUT_WARNING,"Cannot query elf handle");
-    	return -1;
-    }
-
-    if (!(strtbl = (char*)IElf->GetSectionTags(hElf, GST_SectionIndex, strtblidx, TAG_DONE)))
-    {
-    	console_printf(OUTPUT_WARNING,"Unable to get string table\n");
-    	return -1;
-    }
-
-    /* Go through all sections, and make sure they are loaded and relocated */
-    for (i = 1; i < nSecs; i++)
-    {
-		if (!(pHeader = IElf->GetSectionHeaderTags(hElf, GST_SectionIndex, i, TAG_DONE)))
-			continue;
-
-		/* We also keep track, where the executable section is located
-		 * which the base address is.
-		 */
-		if (pHeader->sh_flags & SWF_EXECINSTR)
-		{
-			code_elf_addr = pHeader->sh_addr;
-			code_size = pHeader->sh_size;
-			code_relocated_addr = IElf->GetSectionTags(hElf,
-					GST_SectionIndex, i,
-					TAG_DONE);
-
-			console_printf(OUTPUT_SYSTEM, "Executable section (0x%x/%d bytes) starts at %p",(int)code_elf_addr,code_size,code_relocated_addr);
-		}
-
-		/* If this is a rela section, relocate the related section */
-		if (pHeader && (pHeader->sh_type == SHT_RELA))
-		{
-			Elf32_Shdr *pRefHeader;
-
-			/* Get the section header to which this rela section refers. This is the one we want
-			 * to relocate. Make sure that it exists. */
-			pRefHeader = IElf->GetSectionHeaderTags(hElf, GST_SectionIndex, pHeader->sh_info, TAG_DONE);
-
-			/* But we don't need to do anything, if this has the SWF_ALLOC, as this case
-			 * has already been handled by LoadSeg. Sections that bear debugging information
-			 * (e.g., drawf2 ones) don't come with that flag.
-			 */
-			if (pRefHeader && !(pRefHeader->sh_flags & SWF_ALLOC))
-			{
-				console_printf(OUTPUT_SYSTEM, "Relocating section \"%s\" (index %d) which is referred by section \"%s\" (index %d)",
-						&strtbl[pRefHeader->sh_name], pHeader->sh_info,
-						&strtbl[pHeader->sh_name],i);
-				tags[0].ti_Data = pHeader->sh_info;
-
-				if (!IElf->RelocateSection(hElf, tags))
-				{
-					console_printf(OUTPUT_WARNING,"Section %s (index %d) could not been relocated.",&strtbl[pRefHeader->sh_name],(int)pHeader->sh_info);
-				}
-
-			}
-		}
-    }
-}
-
-extern struct Window *mainwin;
-
-BOOL ask_if_retryelf()
-{
-	Object *reqobj;
-
-	reqobj = (Object *)IIntuition->NewObject( IRequester->REQUESTER_GetClass(), NULL,
-            									REQ_Type,       REQTYPE_INFO,
-												REQ_TitleText,  "ATTENTION!!!",
-									            REQ_BodyText,   "DOS failed to get an elfhandle, do you want to retry?",
-									            //REQ_Image,      REQ_IMAGE,
-												//REQ_TimeOutSecs, 10,
-									            REQ_GadgetText, "Retry|Cancel",
-									            TAG_END
-        );
-
-	uint32 code = TRUE;
-	if ( reqobj )
-	{
-		IIntuition->IDoMethod( reqobj, RM_OPENREQ, NULL, mainwin, NULL, TAG_END );
-		IIntuition->GetAttr(REQ_ReturnCode, reqobj, &code);
-		IIntuition->DisposeObject( reqobj );
-	}
-
-	return code;
-}
-
 BOOL 
 attach (struct Process *aprocess)
 {
@@ -260,36 +153,18 @@ attach (struct Process *aprocess)
 		return FALSE;
     }
 
-	BOOL done = FALSE;
-	while(!done)
-	{
-	    IDOS->GetSegListInfoTags(exec_seglist, 
-							 GSLI_ElfHandle, &exec_elfhandle,
-							 //GSLI_Native, &seglist,
-							 TAG_DONE);
-		if(exec_elfhandle)
-			done = TRUE;
-		else
-    	{
-    		BOOL yes = ask_if_retryelf();
-    		if(!yes)
-    		{
-				exec_seglist = 0;
-				console_printf(OUTPUT_WARNING, "Process is no ELF binary!\n");
-				return FALSE;
-			}
-    	}
-    }
-
 	process  = aprocess;
 
+	BOOL suspend = db101_prefs.prefs_suspend_when_attach;
     /* Suspend the task */
     //dprintf("Process state: %d\n",pProcess->pr_Task.tc_State);
-    if (process->pr_Task.tc_State == TS_READY || process->pr_Task.tc_State == TS_WAIT)
-    {
-		console_printf(OUTPUT_SYSTEM, "Suspending task %p", process);
-		IExec->SuspendTask((struct Task *)process, 0);
-    }
+    if(suspend)
+    	if (process->pr_Task.tc_State == TS_READY || process->pr_Task.tc_State == TS_WAIT)
+    	{
+			console_printf(OUTPUT_SYSTEM, "Suspending task %p", process);
+			IExec->SuspendTask((struct Task *)process, 0);
+			IExec->Signal((struct Task *)me, debug_sigfield);
+    	}
 
 	task_exists = TRUE;
 	task_playing = FALSE;
@@ -304,19 +179,9 @@ attach (struct Process *aprocess)
 
 	IDebug->ReadTaskContext((struct Task *)process, &context_copy, RTCF_ALL);
 
-	if (!(exec_elfhandle = open_elfhandle(exec_seglist)))
-	{
-		//killtask();
-		detach();
-		return FALSE;
-	}
-	if (amigaos_relocate_elfhandle(exec_elfhandle) == -1)
-	{
-		//killtask();
-		detach();
-		return FALSE;
-	}
-	IExec->Signal((struct Task *)me, debug_sigfield);
+	IDOS->GetSegListInfoTags(exec_seglist, 
+							 GSLI_ElfHandle, &exec_elfhandle,
+							 TAG_DONE);
 	return TRUE;
 }
 
@@ -396,7 +261,7 @@ int load_inferior(char *filename, char *path, char *args)
 		IExec->Permit();
 		task_exists = FALSE;
 		console_printf(OUTPUT_WARNING, "Couldn't start new task!");
-		ret = -1;
+		return -1;
 	}
 	else
 	{
@@ -411,17 +276,10 @@ int load_inferior(char *filename, char *path, char *args)
 		//printf("New task started...\n");
 		ret = 0;
 	}
-
-	if (!(exec_elfhandle = open_elfhandle(exec_seglist)))
-	{
-		killtask();
-		return -1;
-	}
-	if (amigaos_relocate_elfhandle(exec_elfhandle) == -1)
-	{
-		killtask();
-		return -1;
-	}
+	
+	IDOS->GetSegListInfoTags(exec_seglist, 
+							 GSLI_ElfHandle, &exec_elfhandle,
+							 TAG_DONE);
 
 	return ret;
 }
@@ -430,23 +288,24 @@ BOOL play()
 {
 	if (task_exists)
 	{
-	UBYTE state = process->pr_Task.tc_State;
+		UBYTE state = process->pr_Task.tc_State;
 		if (state != TS_READY)
 		{
 			if(state == TS_CRASHED)
 				process->pr_Task.tc_State = TS_READY;
-			IExec->Forbid();
+			//IExec->Forbid();
+			IDebug->WriteTaskContext((struct Task *)process, &context_copy, RTCF_ALL);
 			IExec->RestartTask((struct Task *)process, 0L);
 			if (process->pr_Task.tc_State == TS_SUSPENDED || process->pr_Task.tc_State == TS_CRASHED)
 			{
-				IExec->Permit();
+				//IExec->Permit();
 				console_printf(OUTPUT_WARNING, "Failed to restart task!");
 				//IExec->RemTask (newtask);
 				return FALSE;
 			}
 			else
 			{
-				IExec->Permit();
+				//IExec->Permit();
 				task_playing = TRUE;
 				return TRUE;
 			}
@@ -475,29 +334,21 @@ void pause()
 
 void step()
 {
-	//current_function->currentline++;
 	if (!hasfunctioncontext)
 		return;
 
 	struct stab_function *f = current_function;
 
-	insert_line_breakpoints();
-
-	if (is_breakpoint_at(context_copy.ip) && !(f->line[f->currentline].type == LINE_LOOP))
-	{
-		should_continue = TRUE;
-		asmstep();
-	}
-	else
-	{
-		install_all_breakpoints();
-		play();
-	}
+	catch_sline = TRUE;
+	stepping_over = TRUE;
+	stepover_func = f;
+	asmstep();
 }
 
 void into()
 {
 	catch_sline = TRUE;
+	stepping_over = FALSE;
 	asmstep();
 }
 
@@ -512,20 +363,23 @@ void asmstep()
 {
 	if(task_exists)
 	{
-		if (task_playing)
+		if(task_playing)
 			pause();
 
-		//context_ptr->ip = context_copy.ip;
-		dprintf("Writing task context...\n");
-		IDebug->WriteTaskContext((struct Task *)process, &context_copy, RTCF_STATE);
-		
-		dprintf("Installing asmstep...\n");
+		IDebug->WriteTaskContext((struct Task *)process, &context_copy, RTCF_STATE|RTCF_GENERAL);
 		asmstep_install();
-		
-		dprintf("Restarting task...\n");
 		play();
-		dprintf("Done!\n");
 	}
+}
+
+void asmstep_nobranch()
+{
+	if(!task_exists)
+		return;
+
+	IDebug->WriteTaskContext((struct Task *)process, &context_copy, RTCF_STATE|RTCF_GENERAL);
+	asmstep_nobranch_install();
+	play();
 }
 
 void asmskip()
@@ -535,7 +389,6 @@ void asmskip()
 		pause();
 
 		context_copy.ip += 4;
-		//context_ptr->ip = context_copy.ip;
 		IDebug->WriteTaskContext((struct Task *)process, &context_copy, RTCF_STATE);
 	}
 }
@@ -545,12 +398,10 @@ void killtask()
 {
 	if (task_exists)
 	{
-		IExec->SuspendTask ((struct Task *) process, 0L);
-
 		//it is unsafe to Remove a process in AmigaDOS
 		//if we attached to the process, RemTask is going to crash...
 		if (!isattached)
-			; //IExec->RemTask ((struct Task *)process);
+			IExec->RemTask ((struct Task *)process);
 		else
 			detach();
 
@@ -590,21 +441,15 @@ amigaos_debug_callback(struct Hook *hook, struct Task *currentTask,
 			break;
 
 		case DBHMT_EXCEPTION:
-			*data = dbgmsg->message.context->ip;
+			//*data = dbgmsg->message.context->ip;
 			traptype = dbgmsg->message.context->Traptype;
+			*data = traptype;
 			if (traptype == 0x700 || traptype == 0xd00)
 			{
-				if (wants_to_crash)
-				{
-					wants_to_crash = FALSE;
-					return 0;
-				}
-				context_ptr = dbgmsg->message.context;
-
-				memcpy (&context_copy, context_ptr, sizeof(struct ExceptionContext));
-
-				IExec->Signal ((struct Task *)me, debug_sigfield);
 			}
+			context_ptr = dbgmsg->message.context;
+			memcpy (&context_copy, context_ptr, sizeof(struct ExceptionContext));
+			IExec->Signal ((struct Task *)me, debug_sigfield);
 			return 1;
 
 			break;
@@ -646,6 +491,8 @@ int memory_insert_breakpoint(uint32 addr, uint32 *buffer)
   uint32 oldAttr;
   APTR stack;
 
+dprintf("Setting BP at 0x%x\n", addr);
+
   /* Write the breakpoint.  */
   if (1)
   {
@@ -656,14 +503,17 @@ int memory_insert_breakpoint(uint32 addr, uint32 *buffer)
 	oldAttr = IMMU->GetMemoryAttrs((APTR)addr, 0);
 	IMMU->SetMemoryAttrs((APTR)addr, 4, MEMATTRF_READ_WRITE);
 
-		//*buffer = *(uint32 *)addr;
-		//*(uint32 *)addr = meth_start;	//insert asm("trap")
+#if 1
+		*buffer = *(uint32 *)addr;
+		*(uint32 *)addr = meth_start;	//insert asm("trap")
 		//dprintf("buffer: 0x%x meth_start: 0x%x addr:0x%x\n", *buffer, meth_start, addr);
+#else
 		uint32 realaddr = (uint32)IMMU->GetPhysicalAddress((APTR)addr);
 		if(realaddr == 0x0)
 			realaddr = addr;
-dprintf("Setting bp at 0x%x\n", realaddr);
+		//dprintf("Setting bp at 0x%x\n", realaddr);
 		*buffer = setbreak(realaddr, meth_start);
+#endif
 
 	/* Set old attributes again */
 	IMMU->SetMemoryAttrs((APTR)addr, 4, oldAttr);
@@ -693,13 +543,15 @@ int memory_remove_breakpoint(uint32 addr, uint32 *buffer)
   	/* Make sure to unprotect the memory area */
 	oldAttr = IMMU->GetMemoryAttrs((APTR)addr, 0);
 	IMMU->SetMemoryAttrs((APTR)addr, 4, MEMATTRF_READ_WRITE);
-	
-		//*(uint32 *)addr = *buffer;	//restore old instruction
-	uint32 realaddr = (uint32)IMMU->GetPhysicalAddress((APTR)addr);
+
+#if 1
+		*(uint32 *)addr = *buffer;	//restore old instruction
+#else
+		uint32 realaddr = (uint32)IMMU->GetPhysicalAddress((APTR)addr);
 		if(realaddr == 0x0)
 			realaddr = addr;
-
-	setbreak(realaddr, *buffer);
+		setbreak(realaddr, *buffer);
+#endif
 
 	/* Set old attributes again */
 	IMMU->SetMemoryAttrs((APTR)addr, 4, oldAttr);

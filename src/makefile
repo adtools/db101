@@ -27,16 +27,17 @@ suspend.o: suspend.c suspend.h symbols.h gui.h breakpoints.h stabs.h
 symbols.o: symbols.c symbols.h suspend.h stabs.h
 	$(CC) -c -gstabs -o symbols.o symbols.c
 
-gui.o: gui.c gui.h suspend.h stabs.h symbols.h variables.h disassembler.h breakpoints.h stacktrace.h freemem.h unix.h signalswindow.h
+gui.o: gui.c gui.h suspend.h stabs.h symbols.h variables.h disassembler.h breakpoints.h stacktrace.h freemem.h unix.h \
+				signalswindow.h preferences.h modules.h
 	$(CC) -c -gstabs -o gui.o gui.c
 
 hexview.o: hexview.c hexview.h suspend.h symbols.h freemem.h
 	$(CC) -c -gstabs -o hexview.o hexview.c
 
-main.o: main.c suspend.h gui.h breakpoints.h freemem.h
+main.o: main.c suspend.h gui.h breakpoints.h freemem.h preferences.h
 	$(CC) -c -gstabs -o main.o main.c
 
-stabs.o: stabs.c stabs.h suspend.h freemem.h symbols.h
+stabs.o: stabs.c stabs.h suspend.h freemem.h symbols.h console.h gui.h preferences.h elf.h progress.h symbols.h
 	$(CC) -c -gstabs -o stabs.o stabs.c
 
 variables.o: variables.c variables.h suspend.h stabs.h gui.h freemem.h
@@ -63,10 +64,10 @@ freemem.o: freemem.c freemem.h
 arexxport.o: arexxport.c arexxport.h suspend.h breakpoints.h gui.h
 	$(CC) -c -gstabs -o arexxport.o arexxport.c
 
-console.o: console.c console.h freemem.h gui.h
+console.o: console.c console.h freemem.h gui.h stabs.h
 	$(CC) -c -gstabs -o console.o console.c
 
-source.o: source.c source.h freemem.h console.h stabs.h gui.h breakpoints.h
+source.o: source.c source.h freemem.h console.h stabs.h gui.h breakpoints.h modules.h
 	$(CC) -c -gstabs -o source.o source.c
 
 pipe.o: pipe.c pipe.h
@@ -81,6 +82,24 @@ sourcelist.o: sourcelist.c sourcelist.h source.h freemem.h console.h stabs.h gui
 signalswindow.o: signalswindow.c signalswindow.h suspend.h
 	$(CC) -c -gstabs -o signalswindow.o signalswindow.c
 
+importwindow.o: importwindow.c importwindow.h breakpoints.h
+	$(CC) -c -gstabs -o importwindow.o importwindow.c
+
+preferences.o: preferences.c preferences.h console.h
+	$(CC) -c -gstabs -o preferences.o preferences.c
+
+tracking.o: tracking.c tracking.h console.h preferences.h suspend.h freemem.h stabs.h elf.h modules.h
+	$(CC) -c -gstabs -o tracking.o tracking.c
+
+elf.o: elf.c elf.h
+	$(CC) -c -gstabs -o elf.o elf.c
+
+modules.o: modules.c modules.h stabs.h tracking.h console.h freemem.h
+	$(CC) -c -gstabs -o modules.o modules.c
+
+progress.o: progress.h progress.c
+	$(CC) -c -gstabs -o progress.o progress.c
+	
 setbreak.o: setbreak.s
 	$(CC) -c -o setbreak.o -Wa,-mregnames setbreak.s
 	
@@ -88,11 +107,13 @@ __unix_to_amiga_path_name.o: __unix_to_amiga_path_name.c unix.h
 	$(CC) -c -gstabs -o __unix_to_amiga_path_name.o __unix_to_amiga_path_name.c
 
 ../db101: suspend.o symbols.o gui.o hexview.o console.o source.o \
-			stabs.o variables.o pipe.o async.o sourcelist.o signalswindow.o \
+			stabs.o variables.o pipe.o async.o sourcelist.o signalswindow.o importwindow.o \
 			disassembler.o main.o breakpoints.o stacktrace.o attach.o breakpointswindow.o \
+			preferences.o tracking.o elf.o modules.o progress.o \
 			freemem.o arexxport.o setbreak.o __unix_to_amiga_path_name.o
 	$(CC) -gstabs main.o suspend.o symbols.o gui.o hexview.o stabs.o variables.o \
 			disassembler.o breakpoints.o stacktrace.o attach.o async.o sourcelist.o \
 			breakpointswindow.o freemem.o arexxport.o console.o source.o pipe.o \
-			signalswindow.o \
+			signalswindow.o importwindow.o preferences.o tracking.o elf.o \
+			modules.o progress.o \
 			setbreak.o __unix_to_amiga_path_name.o   -lauto -o ../db101

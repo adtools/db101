@@ -39,13 +39,15 @@
 #include "stacktrace.h"
 #include "freemem.h"
 #include "variables.h"
+#include "progress.h"
+#include "console.h"
 
-//Object *StacktraceListBrowserObj;
 struct List stacktrace_list;
 
 extern struct Window *mainwin;
 
 extern struct DebugIFace *IDebug;
+extern struct MMUIFace *IMMU;
 
 #define MAX(a, b)  (a>b?a:b)
 
@@ -70,6 +72,8 @@ void stacktrace_clear()
 	IIntuition->RefreshGadgets ((struct Gadget *)MainObj[GAD_STACKTRACE_LISTBROWSER], mainwin, NULL);
 }
 
+void make_symbol_from_address(uint32 addr, char *buffer, int buffer_size);
+
 void stacktrace_update()
 {
 	if (!task_exists)
@@ -78,23 +82,57 @@ void stacktrace_update()
 	stacktrace_clear();
 	IExec->NewList(&stacktrace_list);
 	
-	struct Task *t = (struct Task *)process;
-	struct Node *node;
-	uint32 stacksize = process->pr_StackSize;
-	uint32 stackupper = (uint32)t->tc_SPUpper;
-	uint32 stackpointer = context_copy.gpr[1]; //(uint32)t->tc_SPReg;
-
-	uint32 p = stackpointer;
 	IIntuition->SetAttrs(MainObj[GAD_STACKTRACE_LISTBROWSER], LISTBROWSER_Labels, ~0, TAG_DONE);
-	int i = 0;
-	while (p < stackupper-28)
+
+	//crashsite
+	int i = 1;
+	char buffer[512] = "";
+	struct Node *node;
+	BOOL firstframe = TRUE;
+
+	struct Task *t = (struct Task *)process;
+	uint32 stackupper = (uint32)t->tc_SPUpper;
+	uint32 stacklower = (uint32)t->tc_SPLower;
+	uint32 stackpointer =  (uint32)t->tc_SPReg; //context_copy.gpr[1];
+
+open_progress("Making stacktrace...", stackupper-stackpointer, 0);
+
+	uint32 *p = (uint32 *)stackpointer;
+
+	struct stab_function *f = stabs_get_function_from_address (context_copy.ip);
+	char *fname = NULL;
+	if (f && f->name)
+		fname = f->name;
+	sprintf(buffer, "0x%x 0x%x (%d): %s", p, p-stackpointer, i, fname);
+	if (node = IListBrowser->AllocListBrowserNode(2,
+            									LBNA_Column, 0,
+                								LBNCA_CopyText, TRUE,
+                								LBNCA_Text, buffer,
+            									TAG_DONE))
+        							{
+							            IExec->AddTail(&stacktrace_list, node);
+									}
+	while (p)
 	{
+		uint32 lr;
 		i++;
-		char *str = (char*) freemem_malloc(stacktrace_freemem_hook, 1024);
+		
+		p =(uint32 *)*p;
+		if(stacklower >= (uint32)p || stackupper <= (uint32)p)
+			break;
+
+        uint32 memflags = IMMU->GetMemoryAttrs((APTR)p, 0);
+        if(memflags & MEMATTRF_NOT_MAPPED)
+        	break;
+
+		lr = p[1];
+        if(!lr && firstframe)
+        	lr = context_copy.lr;
+        firstframe = FALSE;
 
 		//first try the stabs functions:
-		struct stab_function *f = stabs_get_function_from_address (*(uint32*)(p+4));
-		char *fname = NULL;
+		f = stabs_get_function_from_address (lr);
+		fname = NULL;
 		if (f && f->name)
 			fname = f->name;
 		if (!fname)
@@ -110,19 +148,18 @@ void stacktrace_update()
 		if (!fname)
 			fname = "<unknown function>";
 
-		sprintf(str, "0x%x 0x%x (%d): %s", p, p-stackpointer, i, fname);
+		sprintf(buffer, "0x%x 0x%x (%d): %s", p, p-stackpointer, i, fname);
 
 		if (node = IListBrowser->AllocListBrowserNode(2,
             									LBNA_Column, 0,
-                								LBNCA_Text, str,
+            									LBNCA_CopyText, TRUE,
+                								LBNCA_Text, buffer,
             									TAG_DONE))
         							{
 							            IExec->AddTail(&stacktrace_list, node);
 									}
-		if(is_readable_address(p))
-			p = *(uint32*)p;
-		else
-			p = stackupper-28;
+update_progress_val((uint32)p-stackpointer);
 	}
 	IIntuition->SetGadgetAttrs((struct Gadget *)MainObj[GAD_STACKTRACE_LISTBROWSER], mainwin, NULL, LISTBROWSER_Labels, &stacktrace_list, TAG_END);
+close_progress();
 }

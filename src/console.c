@@ -13,6 +13,7 @@
 #include "gui.h"
 #include "freemem.h"
 #include "console.h"
+#include "stabs.h"
 
 //Object *MainObj[GAD_CONSOLE_LISTBROWSER];
 struct List console_list;
@@ -92,7 +93,7 @@ char *getlinefromfile (int line)
 
 	// if current function comes from an included file, the included name is what we are looking for
 	//char *sourcename = (current_function->isinclude ? current_function->includename : current_function->sourcename);
-	char *sourcename = current_function->sourcename;
+	char *sourcename = current_function->sourcefile->filename;
 	char *realname;
 	int u = 0;
 	if((u=__unix_to_amiga_path_name(sourcename, &realname)) == 1)
@@ -188,5 +189,5 @@ void output_lineinfile (uint32 line)
 
 void output_functionheader ()
 {
-	console_printf(OUTPUT_NORMAL, "entering: %s() in <%s>", current_function->name, current_function->sourcename);
+	console_printf(OUTPUT_NORMAL, "entering: %s() in <%s>", current_function->name, current_function->sourcefile->filename);
 }
